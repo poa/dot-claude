@@ -1,0 +1,40 @@
+{
+  "name": "usage-footer",
+  "version": "0.2.0",
+  "description": "Prompt footer with model, effort, context bar, 5h limit and cache countdown; keeps the prompt cache warm during work hours and compacts when idle after them",
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "keepAlive": {
+      "type": "boolean",
+      "title": "Keep the prompt cache warm",
+      "description": "During work hours, ping the model when the cache has ~5 min left and you are idle; outside them, compact instead.",
+      "default": true
+    },
+    "keepAliveFrom": {
+      "type": "string",
+      "title": "Work hours start (HH:MM)",
+      "description": "Local time from which idle keep-alive pings are sent.",
+      "default": "07:00"
+    },
+    "keepAliveUntil": {
+      "type": "string",
+      "title": "Work hours end (HH:MM)",
+      "description": "Local time after which an idle session is compacted instead of kept warm.",
+      "default": "20:00"
+    },
+    "utcOffset": {
+      "type": "string",
+      "title": "UTC offset override (e.g. +07:00)",
+      "description": "Leave empty to use the system timezone.",
+      "default": ""
+    },
+    "cacheTtlMinutes": {
+      "type": "number",
+      "title": "Prompt cache lifetime (minutes)",
+      "description": "60 for the 1-hour cache this setup uses; set lower only to test the keep-alive quickly.",
+      "default": 60,
+      "min": 1,
+      "max": 60
+    }
+  }
+}

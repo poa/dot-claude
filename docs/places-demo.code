@@ -1,0 +1,186 @@
+# places-demo mod for Claude Code 2.1.289 - all files, each after a '==== <path>' header.
+# Recreate the folder layout from the headers. See places-demo.md for what it shows.
+
+==== places-demo/.claude-plugin/plugin.json
+{
+  "name": "places-demo",
+  "version": "0.1.0",
+  "description": "Labels every place a plugin can put custom info with that place's name (colored where the place allows it)"
+}
+
+==== places-demo/hooks/hooks.json
+{ "modules": ["./register.tsx"] }
+
+==== places-demo/hooks/register.tsx
+import type { EngineInterface, Register, RenderComponent, RenderElement, RenderInput } from 'claude-code'
+
+const PANE = 'places-demo'
+
+// Places that take a drawn tree: each gets a colored [Name] tag beside the engine's own content.
+const TREE_PLACES: ReadonlyArray<readonly [RenderComponent, string]> = [
+  ['SessionMode', 'green'],
+  ['PromptHint', 'yellow'],
+  ['Spinner', 'blue'],
+  ['TurnDuration', 'red'],
+  ['InfoNotice', '#ff8800'],
+  ['UserMessage', '#5fafff'],
+  ['AssistantMessage', '#af87ff'],
+  ['ToolUse', '#00d7af'],
+  ['ToolResult', '#87d700'],
+  ['ToolGroup', '#d7af00'],
+  ['ToolProgress', '#ff5f87'],
+  ['CommandOutput', '#5fd7ff'],
+  ['AskUserQuestion', '#ffaf5f'],
+]
+
+// Places that only take a plain string: no colors (control characters are refused).
+const STRING_PLACES = [
+  ['ui.status', 'pinned plugin status line under the prompt'],
+  ['ui.toast', 'transient toast'],
+  ['ui.log', 'dim line appended to the transcript'],
+  ['ui.notice', 'line inside an open permission dialog'],
+  ['SessionMode.modes', 'dim label at the right of the footer row'],
+  ['PromptHint.tail', 'dim text after the hint line'],
+] as const
+
+async function tagged($: EngineInterface, e: RenderInput, inner: RenderElement, name: string, color: string) {
+  const { Box, Text } = $.ui.resolve(e)
+  return (
+    <Box>
+      <Text color={color} bold>{`[${name}] `}</Text>
+      {inner}
+    </Box>
+  ) as RenderElement
+}
+
+export const register: Register = on => {
+  on('session.start', async ($, e, next) => {
+    await $.command.register({ name: 'places-pane', description: 'Open the places-demo pane (legend of every custom-info place)' })
+    $.ui.status('[ui.status] pinned plugin status line - plain text only')
+    $.ui.log('[ui.log] dim transcript line - plain text only')
+    return next(e)
+  })
+
+  on('command.run', { command: 'places-pane' }, async $ => {
+    await $.ui.open({ id: PANE, title: 'places-demo' })
+    return { text: 'places-demo pane opened.' }
+  })
+
+  on('turn.complete', ($, e, next) => {
+    $.ui.toast('[ui.toast] transient toast - plain text only', { timeoutMs: 8000 })
+    return next(e)
+  })
+
+  on('tool.call', ($, e, next) => {
+    if (e.tool_use_id !== undefined) {
+      $.ui.notice(e.tool_use_id, '[ui.notice] line inside the permission dialog - plain text only')
+    }
+    return next(e)
+  })
+
+  // String props first (dim, no color), then the colored tree tag around the result.
+  on('ui.render', { component: 'SessionMode' }, async ($, e, next) => {
+    const inner = await next({ ...e, props: { ...e.props, modes: [...e.props.modes, 'SessionMode.modes (dim string)'] } })
+    return tagged($, e, inner, 'SessionMode', 'green')
+  })
+
+  on('ui.render', { component: 'PromptHint' }, async ($, e, next) => {
+    const inner = await next({ ...e, props: { ...e.props, tail: 'PromptHint.tail (dim string)' } })
+    return tagged($, e, inner, 'PromptHint', 'yellow')
+  })
+
+  // SessionMode and PromptHint have their own hooks above.
+  const wrapColors = new Map(TREE_PLACES.filter(([c]) => c !== 'SessionMode' && c !== 'PromptHint'))
+  on('ui.render', async ($, e, next) => {
+    const color = wrapColors.get(e.component)
+    if (color === undefined) {
+      return next(e)
+    }
+    return tagged($, e, await next(e), e.component, color)
+  })
+
+  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    if (e.props.hasSurvey) {
+      return next(e)
+    }
+    const { Box, Text } = $.ui.resolve(e)
+    return (
+      <Box>
+        <Text color="cyan" bold>[AbovePrompt] </Text>
+        <Text>band above the input box - any tree: colored text, buttons, inputs</Text>
+      </Box>
+    )
+  })
+
+  on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
+    const { Box, Text } = $.ui.resolve(e)
+    return (
+      <Box flexDirection="column">
+        <Text color="magenta" bold>[Pane] framed region opened by /places-pane - any tree, colors allowed</Text>
+        <Text> </Text>
+        <Text bold>Tree places (colored tag shown):</Text>
+        <Text color="cyan">  AbovePrompt - band above the input box</Text>
+        {TREE_PLACES.map(([name, color]) => (
+          <Text color={color}>{`  ${name}`}</Text>
+        ))}
+        <Text> </Text>
+        <Text bold>String-only places (no colors):</Text>
+        {STRING_PLACES.map(([name, what]) => (
+          <Text dimColor>{`  ${name} - ${what}`}</Text>
+        ))}
+        <Text> </Text>
+        <Text bold>Outside the plugin API:</Text>
+        <Text>  statusLine command (settings.json) - ANSI colors allowed</Text>
+        <Text dimColor>  input box borders (session name) - not customizable</Text>
+      </Box>
+    )
+  })
+}
+
+==== places-demo/hooks/register.test.ts
+import { expect, test } from 'claude-code/testing'
+import type { RenderElement } from 'claude-code'
+
+for (const surface of ['terminal', 'desktop'] as const) {
+  test(`SessionMode gets a colored tag and a dim string label on ${surface}`, async ($, on) => {
+    let modes: readonly string[] = []
+    on('ui.render', { component: 'SessionMode' }, ($, e) => {
+      modes = e.props.modes
+      const { Text } = $.ui.resolve(e)
+      return h(Text, {}, e.props.modes.join(' & ')) as RenderElement
+    })
+
+    const ui = await $.ui.mount({ plugin: 'places-demo', surface, component: 'SessionMode', props: { modes: [] } })
+
+    expect(modes).toEqual(['SessionMode.modes (dim string)'])
+    expect(await ui.find({ text: '[SessionMode] ' })).toBeDefined()
+  })
+
+  test(`Spinner keeps the engine's content beside the tag on ${surface}`, async ($, on) => {
+    on('ui.render', { component: 'Spinner' }, ($, e) => {
+      const { Text } = $.ui.resolve(e)
+      return h(Text, {}, e.props.word) as RenderElement
+    })
+
+    const ui = await $.ui.mount({
+      plugin: 'places-demo',
+      surface,
+      component: 'Spinner',
+      props: { word: 'Sauteing', message: null, suffix: '…', mode: 'thinking' },
+    })
+
+    expect(await ui.find({ text: '[Spinner] ' })).toBeDefined()
+    expect(await ui.find({ text: 'Sauteing' })).toBeDefined()
+  })
+}
+
+==== ~/.claude/statusline-command.sh (excerpt: the [statusLine] demo tag)
+# Demo tag while the places-demo mod exists; delete the mod folder to drop it.
+demo_tag=""
+if compgen -G "$HOME/.claude/dev-mods/*/places-demo" >/dev/null; then
+    demo_tag=$'\033[01;97;45m[statusLine]\033[00m '
+fi
+
+build_left() {
+    printf '%s%s\033[01;32m%s@%s\033[00m:\033[01;34m%s\033[00m%s' "$demo_tag" "$chroot" "$user" "$host" "$1" "$git_segment"
+}
