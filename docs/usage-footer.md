@@ -170,7 +170,7 @@ The mod and the status line script are part of the `claude-setup` repo: follow "
 - `bash`, `jq` and `git` for the status line script.
 - A Nerd Font in the terminal, for the git icons.
 
-`CLAUDE_CODE_PLUGIN_DIRS` is read from user settings, `--settings` or the process environment, never from a project's settings. To load another mod, append its path with `:`.
+The `claude` shell function (`shell/claude.sh`) sets `CLAUDE_CODE_PLUGIN_DIRS` to `$CLAUDE_SETUP_DIR/mods`. Claude Code treats that as a folder of plugins and loads every mod in it, so another mod only needs its own folder there. Claude Code also reads the variable from user settings or `--settings`, never from a project's settings.
 
 ### Verify and restart
 
@@ -179,15 +179,15 @@ claude plugin validate mods/usage-footer   # one "no author" warning is expected
 claude plugin test mods/usage-footer       # all tests should pass
 ```
 
-Restart Claude Code through the `claude` alias. The footer appears under the prompt box after the first redraw.
+Restart Claude Code through the `claude` shell function. The footer appears under the prompt box after the first redraw.
 
 Options you changed in `/config` live in each machine's own settings; set them again on a new machine.
 
 ### Switch it off
 
 - Pings and compaction only: set `keepAlive` to off in `/config`.
-- The whole mod: remove `CLAUDE_CODE_PLUGIN_DIRS` from the `env` block of `settings.json` in this repo and restart.
-- Status line: remove the `statusLine` block from the same file.
+- The whole mod: move `mods/usage-footer/` out of `mods/` and restart.
+- Status line: remove the `statusLine` block from `settings.json` in this repo.
 
 ---
 

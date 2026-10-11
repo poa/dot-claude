@@ -1,6 +1,5 @@
 {
   "env": {
-    "CLAUDE_CODE_PLUGIN_DIRS": "~/git/pers/claude-setup/mods/usage-footer",
     "DISABLE_TELEMETRY": "1",
     "DISABLE_ERROR_REPORTING": "1",
     "DISABLE_AUTOUPDATER": "1",
@@ -10,7 +9,7 @@
   },
   "statusLine": {
     "type": "command",
-    "command": "bash ~/git/pers/claude-setup/statusline-command.sh"
+    "command": "bash \"$CLAUDE_SETUP_DIR/statusline-command.sh\""
   },
   "theme": "dark",
   "editorMode": "vim"
