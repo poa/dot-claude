@@ -1,4 +1,4 @@
-# claude-setup
+# dot-claude
 
 Personal Claude Code configuration, kept in git and shared between workstations. Not tied to any project.
 
@@ -13,7 +13,9 @@ The repo can live anywhere. `install.sh` writes its location to `CLAUDE_SETUP_DI
 | `statusline-command.sh` | Status line script, run in place (`statusLine` in `settings.json`, through `$CLAUDE_SETUP_DIR`) |
 | `mods/` | Mods, one folder each; the `claude` function loads all of them (`CLAUDE_CODE_PLUGIN_DIRS=$CLAUDE_SETUP_DIR/mods`). `mods/usage-footer/`: see `docs/usage-footer.md` |
 | `settings.json` | Layered over `~/.claude/settings.json` by the `claude` function; see "Settings" |
-| `shell/claude.sh` | Defines the `claude` shell function (this repo's settings and mods) and the shell binding for Ctrl+Enter; sourced from `~/.zshrc` and `~/.bashrc` |
+| `shell/claude.sh` | Defines the `claude` shell function (this repo's settings and mods) and the shell binding for Ctrl+Enter, and puts `bin/` on `PATH`; sourced from `~/.zshrc` and `~/.bashrc` |
+| `bin/` | Scripts that list, prune and repair sessions in `~/.claude/projects`; see "Session tools" |
+| `lib/sessions.sh` | Functions shared by the `bin/` scripts |
 | `install.sh` | Creates the links, the `CLAUDE_SETUP_DIR` lines in `~/.zshrc` and `~/.bashrc` (whichever exist) and the `post-merge` git hook; safe to re-run, and repoints everything after a move |
 
 ## Settings
@@ -96,7 +98,7 @@ Notes:
 ## New machine
 
 1. Install `git`, `jq` and a Nerd Font (for the status line icons).
-2. Clone the repo anywhere, for example to `~/git/pers/claude-setup`.
+2. Clone the repo anywhere, for example to `~/git/pers/dot-claude`.
 3. Run `install.sh` from the clone. If it reports `DRIFT`, the machine already has a different `~/.claude/CLAUDE.md` or `keybindings.json`: merge it into the repo, delete the original and run the script again.
 4. Add the `env` variables listed in "Current split" to `~/.claude/settings.json` (see "Env block sample"), copying the values from another machine and adjusting the proxy. Don't add `CLAUDE_CODE_PLUGIN_DIRS` or `statusLine` there.
 5. On Windows, add the Windows Terminal mapping from "Keys".
@@ -107,8 +109,26 @@ Notes:
 1. Move the folder.
 2. Run `install.sh` from the new location. It rewrites `CLAUDE_SETUP_DIR` in `~/.zshrc` and `~/.bashrc` and repoints the `~/.claude` links and the git hook.
 3. Open new terminals (or run `exec zsh`) and restart Claude Code sessions.
+4. Claude Code keeps this repo's sessions and memory in a folder named after its path (see "Session tools"), so they stay under the old name. With Claude Code closed, rename `~/.claude/projects/<old name>` to the new name (move its contents if the new folder exists), then run `claude-check-cwd.sh -m rewrite -p <new name> --go` to update the path recorded in the sessions.
 
 Until step 2, the `~/.claude` links point to the old location and the `claude` function finds nothing.
+
+## Session tools
+
+Scripts in `bin/` for the sessions in `~/.claude/projects` (`$CLAUDE_CONFIG_DIR/projects` if that's set). `shell/claude.sh` puts `bin/` on `PATH`. They need `jq`; `claude-check-cwd.sh -m rewrite` also needs `perl`. `claude-check-cwd.sh` and `claude-short-sessions.sh` take `-h` for options.
+
+| Script | What it does |
+|---|---|
+| `claude-projects.sh` | One line per project folder: sessions, size, memory files, last activity, status and real path. Read-only. |
+| `claude-sessions.sh` | One line per session: ID, last change, size, prompts, replies, project, git branch and name; sorted by project, then time. Read-only. |
+| `claude-short-sessions.sh` | IDs of sessions with at most 3 replies (`-n` to change); `-v` prints them in the `claude-sessions.sh` table. Read-only; its output is meant for `claude-prune.sh`. |
+| `claude-prune.sh` | Deletes sessions by ID or by its first 8 or more characters; refuses a prefix that matches several. Dry run unless the first argument is `--go`. |
+| `claude-check-cwd.sh` | Finds sessions whose recorded working folder doesn't match their project folder (`MISMATCH`) or no longer exists after a rename (`GONE`), and misnamed project folders. `-m rewrite` changes the recorded path, `-m move` moves the session to the folder of its path. Dry run unless `--go`; changed files are backed up to `~/claude-cwd-backup`. |
+
+- Folder names: Claude Code names a project folder after its path with every character other than a letter or digit replaced by `-` (`/home/me/my_repo.x` becomes `-home-me-my-repo-x`). A folder with any other name is `MISNAMED`: Claude Code never reads it, so its sessions don't appear in `/resume` and its memory isn't loaded. Rename folders only to that form.
+- Prompts are the messages you typed; commands, tool results and summaries don't count. Replies are model responses: one prompt gets several while Claude works.
+- The scripts never change or delete a session whose Claude Code process is running (they check `~/.claude/sessions`). Close other sessions before `claude-check-cwd.sh --go` anyway.
+- The output is a plain table, one row per session or folder, for `cut`, `awk` and `sort`. On a terminal narrower than the table, lines are cut at its width instead of wrapping; piped output is never cut. Pipe to `less -S` to scroll sideways.
 
 ## Day to day
 

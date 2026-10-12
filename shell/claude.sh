@@ -10,6 +10,9 @@ claude() {
     command claude --settings "$CLAUDE_SETUP_DIR/settings.json" "$@"
 }
 
+# Session tools: claude-sessions.sh and the rest of bin/
+case ":$PATH:" in *":$CLAUDE_SETUP_DIR/bin:"*) ;; *) PATH="$PATH:$CLAUDE_SETUP_DIR/bin" ;; esac
+
 # Windows Terminal sends ESC[13;5u for Ctrl+Enter (sendInput action) so Claude Code can tell it from Enter.
 # At the shell prompt, treat it as Enter instead of printing the code.
 if [ -n "$ZSH_VERSION" ]; then

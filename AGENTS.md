@@ -10,6 +10,8 @@ Instructions for AI agents working in this repository. `README.md` describes how
 - `settings.json` holds settings shared by every machine (privacy flags, `theme`, `editorMode`, the status line command). The proxy, `SHELL`, `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` and keys Claude Code writes itself stay in `~/.claude/settings.json`, outside git. See "Settings" in `README.md`.
 - Never copy `~/.claude` runtime data into the repo: `.credentials.json`, `history.jsonl`, `projects/`, `file-history/`, `sessions/`.
 - When you add, move or rename a file that `install.sh` links, update `install.sh` and `README.md`, then run `./install.sh`.
+- Session scripts go in `bin/` with shared functions in `lib/sessions.sh`. Scripts that change `~/.claude/projects` are dry runs unless given `--go`, back up what they rewrite or move, and skip running sessions (`live_sessions`). Build project folder names with `enc`, never by hand. Don't put user, machine or project names in them, including help examples.
 - After changing the mod, run `claude plugin validate mods/usage-footer` and `claude plugin test mods/usage-footer`.
 - Footer and status line output must fit a terminal a half or a third of the screen wide.
+- The `bin/` scripts print plain tables (one row per item, no headings or grouping) so `cut`, `awk` and `sort` work on them. Only `fit` in `lib/sessions.sh` handles narrow terminals, by cutting lines that are too long.
 - Markdown: one line per paragraph or list item (no hard wrapping).
