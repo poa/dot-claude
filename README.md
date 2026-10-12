@@ -8,10 +8,10 @@ The repo can live anywhere. `install.sh` writes its location to `CLAUDE_SETUP_DI
 
 | Path | How Claude Code uses it |
 |---|---|
-| `global/CLAUDE.md` | Linked as `~/.claude/CLAUDE.md`: instructions for every project |
+| [`global/CLAUDE.md`](global/CLAUDE.md) | Linked as `~/.claude/CLAUDE.md`: instructions for every project |
 | `keybindings.json` | Linked as `~/.claude/keybindings.json` |
 | `statusline-command.sh` | Status line script, run in place (`statusLine` in `settings.json`, through `$CLAUDE_SETUP_DIR`) |
-| `mods/` | Mods, one folder each; the `claude` function loads all of them (`CLAUDE_CODE_PLUGIN_DIRS=$CLAUDE_SETUP_DIR/mods`). `mods/usage-footer/`: see `docs/usage-footer.md` |
+| `mods/` | Mods, one folder each; the `claude` function loads all of them (`CLAUDE_CODE_PLUGIN_DIRS=$CLAUDE_SETUP_DIR/mods`). `mods/usage-footer/`: see [`docs/usage-footer.md`](docs/usage-footer.md) |
 | `settings.json` | Layered over `~/.claude/settings.json` by the `claude` function; see "Settings" |
 | `shell/claude.sh` | Defines the `claude` shell function (this repo's settings and mods) and the shell binding for Ctrl+Enter, and puts `bin/` on `PATH`; sourced from `~/.zshrc` and `~/.bashrc` |
 | `bin/` | Scripts that list, prune and repair sessions in `~/.claude/projects`; see "Session tools" |
@@ -132,7 +132,7 @@ Scripts in `bin/` for the sessions in `~/.claude/projects` (`$CLAUDE_CONFIG_DIR/
 
 ## Day to day
 
-- Edits to linked or in-place files (`/memory` → user memory, keybindings, the mod, the status line script) land in the repo: commit and push. The repo is public, `global/CLAUDE.md` included: check `git diff` for private details before you commit. Auto memory stays in `~/.claude/projects/`, outside the repo.
+- Edits to linked or in-place files (`/memory` → user memory, keybindings, the mod, the status line script) land in the repo: commit and push. The repo is public, [`global/CLAUDE.md`](global/CLAUDE.md) included: check `git diff` for private details before you commit. Auto memory stays in `~/.claude/projects/`, outside the repo.
 - `git pull` on another machine re-runs `install.sh` through the hook. Restart Claude Code to pick up settings changes; mod edits hot-reload.
 - `DRIFT` from `install.sh`: something replaced a link with a regular file. Diff the two, merge into the repo, delete the file and re-run.
 - Mod checks: `claude plugin validate mods/usage-footer` and `claude plugin test mods/usage-footer`.

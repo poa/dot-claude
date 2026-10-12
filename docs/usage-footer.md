@@ -162,7 +162,7 @@ Change them in `/config` (the usage-footer rows). They're stored in `~/.claude/s
 
 ## Install / copy to another computer
 
-The mod and the status line script are part of the `dot-claude` repo: follow "New machine" in `README.md`.
+The mod and the status line script are part of the `dot-claude` repo: follow "New machine" in [`README.md`](../README.md#new-machine).
 
 ### Requirements
 
