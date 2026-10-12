@@ -1,3 +1,5 @@
 node_modules/
 # Type definitions Claude Code generates when it loads a mod
 mods/*/.claude-plugin/types/
+# Private project memory (/memory, "Project memory (local)")
+CLAUDE.local.md

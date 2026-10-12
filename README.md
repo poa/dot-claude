@@ -132,7 +132,7 @@ Scripts in `bin/` for the sessions in `~/.claude/projects` (`$CLAUDE_CONFIG_DIR/
 
 ## Day to day
 
-- Edits to linked or in-place files (`/memory`, keybindings, the mod, the status line script) land in the repo: commit and push.
+- Edits to linked or in-place files (`/memory` → user memory, keybindings, the mod, the status line script) land in the repo: commit and push. The repo is public, `global/CLAUDE.md` included: check `git diff` for private details before you commit. Auto memory stays in `~/.claude/projects/`, outside the repo.
 - `git pull` on another machine re-runs `install.sh` through the hook. Restart Claude Code to pick up settings changes; mod edits hot-reload.
 - `DRIFT` from `install.sh`: something replaced a link with a regular file. Diff the two, merge into the repo, delete the file and re-run.
 - Mod checks: `claude plugin validate mods/usage-footer` and `claude plugin test mods/usage-footer`.
