@@ -1,4 +1,6 @@
 export type Effort = string
+// Why keep-alive stopped until the user's next message: a ping found the cache cold, or pings kept failing.
+export type PauseReason = 'cold' | 'failed'
 
 declare module 'claude-code' {
   interface PluginState {
@@ -9,7 +11,9 @@ declare module 'claude-code' {
       lastHumanAt: number | null
       compactedAt: number | null
       keepAlives: number
-      paused: boolean
+      pausedBy: PauseReason | null
+      failures: number
+      compactCold: boolean
     }
   }
 }

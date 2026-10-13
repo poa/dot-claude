@@ -1,13 +1,13 @@
 {
   "name": "usage-footer",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Prompt footer with model, effort, context bar, 5h limit and cache countdown; keeps the prompt cache warm during work hours and compacts when idle after them",
   "types": "./types/index.d.ts",
   "userConfig": {
     "keepAlive": {
       "type": "boolean",
       "title": "Keep the prompt cache warm",
-      "description": "During work hours, ping the model when the cache has ~5 min left and you are idle; outside them, compact instead.",
+      "description": "During work hours, ping the model when the cache has ~5 min left and you are idle; after the idle-ping limit or outside work hours, compact once instead.",
       "default": true
     },
     "keepAliveFrom": {
@@ -19,13 +19,35 @@
     "keepAliveUntil": {
       "type": "string",
       "title": "Work hours end (HH:MM)",
-      "description": "Local time after which an idle session is compacted instead of kept warm.",
+      "description": "Local time after which an idle session is compacted instead of kept warm. Equal to the start: no work hours at all.",
       "default": "20:00"
+    },
+    "keepAliveDays": {
+      "type": "string",
+      "title": "Work days (e.g. Mon-Fri)",
+      "description": "Days with work hours: ranges and lists such as Mon-Fri, Mon,Wed,Fri or Mon-Sun. Other days are treated as after hours.",
+      "default": "Mon-Fri"
+    },
+    "maxIdlePings": {
+      "type": "number",
+      "title": "Idle pings before compacting",
+      "description": "Pings in a row without a message from you; the next near-expiry compacts instead. 0 = no limit.",
+      "default": 3,
+      "min": 0,
+      "max": 24
+    },
+    "minCompactTokens": {
+      "type": "number",
+      "title": "Smallest context to compact (tokens)",
+      "description": "Below this an idle session is left to expire instead of compacted: rebuilding a small context costs less than a summary.",
+      "default": 50000,
+      "min": 0,
+      "max": 10000000
     },
     "utcOffset": {
       "type": "string",
       "title": "UTC offset override (e.g. +07:00)",
-      "description": "Leave empty to use the system timezone.",
+      "description": "Leave empty to use the system timezone. From -12:00 to +14:00.",
       "default": ""
     },
     "cacheTtlMinutes": {
@@ -33,8 +55,14 @@
       "title": "Prompt cache lifetime (minutes)",
       "description": "60 for the 1-hour cache this setup uses; set lower only to test the keep-alive quickly.",
       "default": 60,
-      "min": 1,
+      "min": 2,
       "max": 60
+    },
+    "logUsage": {
+      "type": "boolean",
+      "title": "Log usage per turn",
+      "description": "Write a dim line after each turn with its cache read/written tokens and the 5-hour meter before and after; for measuring what the keep-alive saves.",
+      "default": false
     }
   }
 }

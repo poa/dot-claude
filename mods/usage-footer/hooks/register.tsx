@@ -1,10 +1,27 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, PluginOptions, Register, RenderElement, SessionUsage } from 'claude-code'
+import type { EngineInterface, PluginOptions, Register, RenderElement, SessionCompactResult, SessionUsage } from 'claude-code'
 
-import { decide, inWindow, localMinutes, MINUTE_MS, parseHHMM, parseUtcOffset, wasCacheCold } from './keepalive'
+import type { PauseReason } from '../types'
+import {
+  billedInput,
+  decide,
+  inWorkTime,
+  localMinutes,
+  MINUTE_MS,
+  parseDays,
+  parseHHMM,
+  parseUtcOffset,
+  pingOutcome,
+  plan,
+  wasCacheCold,
+} from './keepalive'
+import type { ForkReply, PlanInput, Usage, WorkTime } from './keepalive'
 
 const REDRAW_EVERY_MS = 30 * 1000
 const PING_PROMPT = 'Keep-alive ping to keep the prompt cache warm. Reply with the single word: ok'
+// Failed pings in a row before keep-alive pauses until the user's next message.
+const MAX_FAILED_PINGS = 3
+const WEEKDAYS = [1, 2, 3, 4, 5]
 
 // Session state, kept across hot reloads (module variables are not).
 const lastRequestAtAtom = atom({ plugin: 'usage-footer', key: 'lastRequestAt' } as const, null)
@@ -13,28 +30,37 @@ const busyAtom = atom({ plugin: 'usage-footer', key: 'busy' } as const, false)
 const lastHumanAtAtom = atom({ plugin: 'usage-footer', key: 'lastHumanAt' } as const, null)
 const compactedAtAtom = atom({ plugin: 'usage-footer', key: 'compactedAt' } as const, null)
 const keepAlivesAtom = atom({ plugin: 'usage-footer', key: 'keepAlives' } as const, 0)
-const pausedAtom = atom({ plugin: 'usage-footer', key: 'paused' } as const, false)
+const pausedByAtom = atom({ plugin: 'usage-footer', key: 'pausedBy' } as const, null)
+const failuresAtom = atom({ plugin: 'usage-footer', key: 'failures' } as const, 0)
+const compactColdAtom = atom({ plugin: 'usage-footer', key: 'compactCold' } as const, false)
 
-export type Settings = {
+export type Settings = WorkTime & {
   keepAlive: boolean
-  fromMinutes: number
-  untilMinutes: number
   untilText: string
-  utcOffsetMinutes: number | undefined
   ttlMs: number
+  maxIdlePings: number
+  minCompactTokens: number
+  logUsage: boolean
 }
+
+// A number option clamped to [min, max]; the default when unset.
+const numberOption = (value: unknown, fallback: number, min: number, max: number) =>
+  typeof value === 'number' && Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback
 
 export function readSettings(options: PluginOptions): Settings {
   const from = parseHHMM(String(options.keepAliveFrom ?? '07:00')) ?? 7 * 60
   const until = parseHHMM(String(options.keepAliveUntil ?? '20:00')) ?? 20 * 60
-  const ttl = typeof options.cacheTtlMinutes === 'number' && options.cacheTtlMinutes > 0 ? options.cacheTtlMinutes : 60
   return {
     keepAlive: options.keepAlive !== false,
     fromMinutes: from,
     untilMinutes: until,
     untilText: hhmm(until),
+    days: parseDays(String(options.keepAliveDays ?? 'Mon-Fri')) ?? WEEKDAYS,
     utcOffsetMinutes: parseUtcOffset(String(options.utcOffset ?? '')),
-    ttlMs: ttl * MINUTE_MS,
+    ttlMs: numberOption(options.cacheTtlMinutes, 60, 2, 60) * MINUTE_MS,
+    maxIdlePings: Math.round(numberOption(options.maxIdlePings, 3, 0, 24)),
+    minCompactTokens: numberOption(options.minCompactTokens, 50_000, 0, 10_000_000),
+    logUsage: options.logUsage === true,
   }
 }
 
@@ -64,6 +90,33 @@ export function modelName(id: string): string {
   }
   const family = m[1].charAt(0).toUpperCase() + m[1].slice(1)
   return m[3] ? `${family} ${m[2]}.${m[3]}` : `${family} ${m[2]}`
+}
+
+// The 5-hour window's use, with the one decimal the engine reports; undefined off a subscription.
+export const fiveHourUsed = (usage: SessionUsage) => usage.rateLimits.find(r => r.kind === 'five_hour')?.percentUsed
+
+// 312_456 -> 312k, 2_345 -> 2.3k, 40 -> 40
+export function tokens(n: number): string {
+  if (n >= 10_000) {
+    return `${Math.round(n / 1000)}k`
+  }
+  return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n)
+}
+
+// What a request cost, for the log lines: its tokens and the 5-hour meter before and after.
+export function costNote(u: Usage | undefined, before: number | undefined, after: number | undefined): string {
+  const parts: string[] = []
+  if (u !== undefined) {
+    parts.push(
+      `cache read ${tokens(u.cache_read_input_tokens)}, written ${tokens(u.cache_creation_input_tokens)}, ` +
+        `uncached ${tokens(u.input_tokens)}, out ${tokens(u.output_tokens)}`,
+    )
+  }
+  if (before !== undefined || after !== undefined) {
+    const percent = (p: number | undefined) => (p === undefined ? '?' : `${p.toFixed(1)}%`)
+    parts.push(`5h ${percent(before)} → ${percent(after)}`)
+  }
+  return parts.join('; ')
 }
 
 export type Part = { text: string; color?: string; bold?: boolean; dim?: boolean }
@@ -103,9 +156,9 @@ export function buildSegments(
     segments.push(bar(usage.context.percent))
   }
 
-  const fiveHour = usage.rateLimits.find(r => r.kind === 'five_hour')
-  if (fiveHour) {
-    segments.push([{ text: `5h ${Math.round(fiveHour.percentUsed)}%`, color: byPercent(fiveHour.percentUsed) }])
+  const fiveHour = fiveHourUsed(usage)
+  if (fiveHour !== undefined) {
+    segments.push([{ text: `5h ${Math.round(fiveHour)}%`, color: byPercent(fiveHour) }])
   }
 
   if (lastRequestAt !== undefined) {
@@ -121,33 +174,47 @@ export function buildSegments(
 }
 
 // Dim footer note on what the keep-alive will do next.
-export function keepAliveSegment(
-  settings: Settings,
-  inWorkHours: boolean,
-  keepAlives: number,
-  lastHumanAt: number | null,
-  compactedAt: number | null,
-  paused = false,
-): Segment | undefined {
+export function keepAliveSegment(settings: Settings, p: PlanInput, pausedBy: PauseReason | null): Segment | undefined {
   if (!settings.keepAlive) {
     return undefined
   }
-  if (paused) {
-    return [{ text: 'keep-alive paused: cache was cold', color: 'yellow' }]
+  if (pausedBy !== null) {
+    return [{ text: pausedBy === 'cold' ? 'keep-alive paused: cache was cold' : 'keep-alive paused: pings failed', color: 'yellow' }]
   }
-  if (inWorkHours) {
-    const count = keepAlives > 0 ? ` ×${keepAlives}` : ''
-    return [{ text: `keep-alive${count} →${settings.untilText}`, dim: true }]
+  switch (plan(p)) {
+    case 'ping': {
+      const limit = p.maxIdlePings > 0 ? `/${p.maxIdlePings}` : ''
+      const count = p.keepAlives > 0 ? ` ×${p.keepAlives}${limit}` : ''
+      return [{ text: `keep-alive${count} →${settings.untilText}`, dim: true }]
+    }
+    case 'compact':
+      return [{ text: 'compact on expiry', dim: true }]
+    default:
+      return undefined
   }
-  const humanSinceCompaction = compactedAt === null || (lastHumanAt !== null && lastHumanAt > compactedAt)
-  return humanSinceCompaction ? [{ text: 'compact on expiry', dim: true }] : undefined
+}
+
+// The keep-alive's inputs from session state, for the tick and the footer alike.
+async function planInput($: EngineInterface, settings: Settings, now: number, usage: SessionUsage): Promise<PlanInput> {
+  return {
+    inWorkHours: inWorkTime(now, settings),
+    keepAlives: await read($, keepAlivesAtom),
+    maxIdlePings: settings.maxIdlePings,
+    lastHumanAt: await read($, lastHumanAtAtom),
+    compactedAt: await read($, compactedAtAtom),
+    compactCold: await read($, compactColdAtom),
+    contextTokens: usage.context.tokens,
+    minCompactTokens: settings.minCompactTokens,
+  }
 }
 
 // Module scope on purpose: a reload drops it with the old module, and one action at a time is enough.
 let acting = false
+// The 5-hour meter when the current turn started, for the logUsage line; a reload loses one line at most.
+let meterAtTurnStart: number | undefined
 
-const isWorkHours = (settings: Settings, now: number) =>
-  inWindow(localMinutes(now, settings.utcOffsetMinutes), settings.fromMinutes, settings.untilMinutes)
+// What one tick acts on: when, and the countdown and meter it saw.
+type Tick = { now: number; at: string; lastRequestAt: number; meterBefore: number | undefined }
 
 // One tick of the keep-alive: ping, compact, or nothing (see decide()).
 async function act($: EngineInterface, settings: Settings) {
@@ -155,75 +222,112 @@ async function act($: EngineInterface, settings: Settings) {
     return
   }
   const now = await $.clock.now()
+  const usage = await $.session.usage()
+  const p = await planInput($, settings, now, usage)
+  const lastRequestAt = await read($, lastRequestAtAtom)
   const decision = decide({
+    ...p,
     now,
-    inWorkHours: isWorkHours(settings, now),
-    lastRequestAt: await read($, lastRequestAtAtom),
+    lastRequestAt,
     ttlMs: settings.ttlMs,
     busy: await read($, busyAtom),
-    lastHumanAt: await read($, lastHumanAtAtom),
-    compactedAt: await read($, compactedAtAtom),
-    paused: await read($, pausedAtom),
+    paused: (await read($, pausedByAtom)) !== null,
   })
-  if (decision === 'none') {
+  if (decision === 'none' || lastRequestAt === null) {
     return
   }
 
   acting = true
-  const at = hhmm(localMinutes(now, settings.utcOffsetMinutes))
+  const tick = { now, at: hhmm(localMinutes(now, settings.utcOffsetMinutes)), lastRequestAt, meterBefore: fiveHourUsed(usage) }
   try {
     if (decision === 'ping') {
-      // The cache lifetime counts from the request start; restored if the ping fails,
-      // so the next tick retries while the cache is still warm.
-      const previous = await read($, lastRequestAtAtom)
-      await update($, lastRequestAtAtom, () => now)
-      let failure: string | undefined
-      let cold = false
-      try {
-        const reply = await $.model.fork({ prompt: PING_PROMPT })
-        failure = reply.isAnswered ? undefined : reply.reason
-        cold = reply.isAnswered && wasCacheCold(reply.usage)
-      } catch (error) {
-        failure = String(error)
-      }
-      if (cold) {
-        // The ping rebuilt the cache instead of refreshing it: the real lifetime is shorter
-        // than cacheTtlMinutes (e.g. 5m during usage overage). Further pings would each cost
-        // a full rebuild, so stop until the user is back.
-        await update($, pausedAtom, () => true)
-        $.ui.log(
-          `usage-footer: keep-alive ping at ${at} found the cache already cold; the cache lifetime looks shorter than ` +
-            `${Math.round(settings.ttlMs / MINUTE_MS)} min, so keep-alive is paused until your next message`,
-        )
-      } else if (failure === undefined) {
-        await update($, keepAlivesAtom, n => n + 1)
-        $.ui.log(`usage-footer: keep-alive ping at ${at}`)
-      } else {
-        await update($, lastRequestAtAtom, () => previous)
-        $.ui.log(`usage-footer: keep-alive ping at ${at} failed (${failure})`)
-      }
+      await ping($, settings, tick)
     } else {
-      // Skipped or failed compactions are not retried until the user types again.
-      let note: string
-      try {
-        const result = await $.session.compact()
-        note = result.messages === undefined ? `skipped (${result.skip})` : 'done'
-      } catch (error) {
-        note = `failed (${String(error)})`
-      }
-      const done = await $.clock.now()
-      await update($, compactedAtAtom, () => done)
-      if (note === 'done') {
-        await update($, lastRequestAtAtom, () => null)
-        await update($, keepAlivesAtom, () => 0)
-        $.ui.log(`usage-footer: compacted at ${at}, idle outside work hours`)
-      } else {
-        $.ui.log(`usage-footer: compaction at ${at} ${note}`)
-      }
+      await compact($, tick, p.inWorkHours ? `idle after ${p.keepAlives} pings` : 'idle outside work hours')
     }
   } finally {
     acting = false
     $.ui.invalidate('ui.render')
+  }
+}
+
+async function ping($: EngineInterface, settings: Settings, t: Tick) {
+  // The cache lifetime counts from the request start, so the countdown restarts now. Put back
+  // below when nothing was billed, and only while it is still ours: a turn that started
+  // meanwhile has recorded a newer request.
+  await update($, lastRequestAtAtom, () => t.now)
+  const putBack = (value: number | null) => update($, lastRequestAtAtom, current => (current === t.now ? value : current))
+
+  let reply: ForkReply
+  try {
+    reply = await $.model.fork({ prompt: PING_PROMPT })
+  } catch (error) {
+    reply = { isAnswered: false, reason: String(error) }
+  }
+  const outcome = pingOutcome(reply)
+  const cost = costNote(reply.usage, t.meterBefore, fiveHourUsed(await $.session.usage()))
+
+  if (outcome === 'warm') {
+    await update($, failuresAtom, () => 0)
+    await update($, keepAlivesAtom, n => n + 1)
+    $.ui.log(`usage-footer: keep-alive ping at ${t.at}: ${cost}`)
+  } else if (outcome === 'cold') {
+    // The ping rebuilt the cache instead of refreshing it: the real lifetime is shorter
+    // than cacheTtlMinutes (e.g. 5m during usage overage). Further pings would each cost
+    // a full rebuild, so stop until the user is back.
+    await update($, failuresAtom, () => 0)
+    await update($, pausedByAtom, () => 'cold')
+    $.ui.log(
+      `usage-footer: keep-alive ping at ${t.at} found the cache already cold (${cost}); the cache lifetime looks shorter than ` +
+        `${Math.round(settings.ttlMs / MINUTE_MS)} min, so keep-alive is paused until your next message`,
+    )
+  } else if (outcome === 'nothing-to-fork') {
+    // No response since /clear: nothing to keep warm.
+    await putBack(null)
+    $.ui.log(`usage-footer: keep-alive at ${t.at}: nothing to keep warm since /clear`)
+  } else {
+    await putBack(t.lastRequestAt)
+    const reason = reply.isAnswered ? 'nothing billed' : reply.reason
+    const failures = await update($, failuresAtom, n => n + 1)
+    if (failures >= MAX_FAILED_PINGS) {
+      await update($, pausedByAtom, () => 'failed')
+      $.ui.log(
+        `usage-footer: keep-alive ping at ${t.at} failed (${reason}), ${failures} in a row; keep-alive is paused until your next message`,
+      )
+    } else {
+      $.ui.log(`usage-footer: keep-alive ping at ${t.at} failed (${reason})`)
+    }
+  }
+}
+
+// Skipped or failed compactions are not retried until the user types again.
+async function compact($: EngineInterface, t: Tick, why: string) {
+  let result: SessionCompactResult | string
+  try {
+    result = await $.session.compact()
+  } catch (error) {
+    result = `failed (${String(error)})`
+  }
+  const done = await $.clock.now()
+  await update($, compactedAtAtom, () => done)
+  if (typeof result === 'string' || result.messages === undefined) {
+    $.ui.log(`usage-footer: compaction at ${t.at} ${typeof result === 'string' ? result : `skipped (${result.skip})`}`)
+    return
+  }
+
+  // The compacted conversation has no cache yet; keep a newer request a turn recorded meanwhile.
+  await update($, lastRequestAtAtom, current => (current === t.lastRequestAt ? null : current))
+  await update($, keepAlivesAtom, () => 0)
+  const u = result.usage
+  const cost = costNote(u, t.meterBefore, fiveHourUsed(await $.session.usage()))
+  const details = cost === '' ? '' : ` (${cost})`
+  if (u !== undefined && billedInput(u) > 0 && wasCacheCold(u)) {
+    // The summary request did not share the conversation's cache, so it cost about as much as
+    // the rebuild it was meant to avoid: don't repeat it in this session.
+    await update($, compactColdAtom, () => true)
+    $.ui.log(`usage-footer: compacted at ${t.at}, ${why}, but the cache was cold${details}; no more automatic compactions in this session`)
+  } else {
+    $.ui.log(`usage-footer: compacted at ${t.at}, ${why}${details}`)
   }
 }
 
@@ -250,13 +354,18 @@ export const register: Register = (on, options) => {
       const now = await $.clock.now()
       await update($, lastHumanAtAtom, () => now)
       await update($, keepAlivesAtom, () => 0)
-      await update($, pausedAtom, () => false)
+      await update($, failuresAtom, () => 0)
+      await update($, pausedByAtom, () => null)
     }
     return next(e)
   })
 
+  // Main-thread turns only: a subagent's run raises no turn.start.
   on('turn.start', async ($, e, next) => {
     await update($, busyAtom, () => true)
+    if (settings.logUsage) {
+      meterAtTurnStart = fiveHourUsed(await $.session.usage())
+    }
     return next(e)
   })
 
@@ -275,32 +384,42 @@ export const register: Register = (on, options) => {
     return yield* next(e)
   })
 
+  // Raised however the turn ended: answered, interrupted, refused or failed.
   on('turn.complete', async ($, e, next) => {
     if (e.agentId === undefined) {
       await update($, busyAtom, () => false)
+      if (settings.logUsage) {
+        const cost = costNote(e.usage, meterAtTurnStart, fiveHourUsed(await $.session.usage()))
+        $.ui.log(`usage-footer: turn: ${cost === '' ? 'no usage reported' : cost}`)
+      }
     }
     $.ui.invalidate('ui.render')
     return next(e)
   })
 
+  // A compaction the user or the engine ran (the mod's own calls skip this hook): the
+  // compacted conversation has no cache yet, and a ping would only re-read the old one.
+  on('session.compact', async ($, e, next) => {
+    const result = await next(e)
+    if (e.agentId === undefined && e.trigger !== 'precompute' && result.messages !== undefined) {
+      await update($, lastRequestAtAtom, () => null)
+      $.ui.invalidate('ui.render')
+    }
+    return result
+  }).catch(($, e, next) => next(e)) // the compaction's own result, never run twice
+
   on('ui.render', { component: 'SessionMode' }, async ($, e, next) => {
     const now = await $.clock.now()
+    const usage = await $.session.usage()
     const segments = buildSegments(
-      await $.session.usage(),
+      usage,
       modelName(await $.session.model()),
       (await read($, effortAtom)) ?? undefined,
       (await read($, lastRequestAtAtom)) ?? undefined,
       now,
       settings.ttlMs,
     )
-    const keepAlive = keepAliveSegment(
-      settings,
-      isWorkHours(settings, now),
-      await read($, keepAlivesAtom),
-      await read($, lastHumanAtAtom),
-      await read($, compactedAtAtom),
-      await read($, pausedAtom),
-    )
+    const keepAlive = keepAliveSegment(settings, await planInput($, settings, now, usage), await read($, pausedByAtom))
     if (keepAlive) {
       segments.push(keepAlive)
     }
