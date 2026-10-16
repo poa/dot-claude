@@ -65,7 +65,7 @@ the settings the session uses
 
 ## Keys
 
-`keybindings.json` makes `Enter` and `Shift+Enter` insert a new line; `Ctrl+Enter` and `Ctrl+K` send.
+`keybindings.json` makes `Enter` and `Shift+Enter` insert a new line; `Ctrl+Enter` sends. `Ctrl+X Enter`, a Claude Code default, also sends, in any terminal. `Ctrl+K` keeps its default, deleting from the cursor to the end of the line.
 
 ### Windows Terminal: make Ctrl+Enter send
 
@@ -93,7 +93,7 @@ Notes:
 - The mapping applies to every Windows Terminal tab. `shell/claude.sh` binds the code to `accept-line` in zsh and bash, so there it acts as `Enter`. In PowerShell, `Ctrl+Enter` no longer inserts a line above.
 - If a future Claude Code version stops reading `ESC[13;5u` as Ctrl+Enter, try the other common encoding, `\u001b[27;5;13~`, in the action (and in the `shell/claude.sh` bindings).
 - To undo, restore the backup or delete the two entries.
-- Without the mapping, `Ctrl+Enter` inserts a new line; `Ctrl+K` sends in any terminal.
+- Without the mapping, `Ctrl+Enter` inserts a new line; `Ctrl+X Enter` sends.
 
 ## New machine
 
