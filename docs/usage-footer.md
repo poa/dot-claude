@@ -8,7 +8,7 @@ A Claude Code mod (plugin function hooks) that:
 
 It comes with a status line script (`statusline-command.sh` in this repo) that shows `user@host:path`, the git branch, and a red warning when the cache lifetime isn't 1 hour.
 
-- Mod: `mods/usage-footer/`, version 0.3.0
+- Mod: `mods/usage-footer/`, version 0.4.0
 - Built on: Claude Code 2.1.296
 
 ---
@@ -53,11 +53,19 @@ usage-footer: compacted at 15:40, idle after 3 pings (cache read 312k, written 2
 usage-footer: compacted at 20:37, idle outside work hours (...)
 usage-footer: compacted at 20:37, idle outside work hours, but the cache was cold (...); no more automatic compactions in this session
 usage-footer: compaction at 20:37 skipped (<reason>)
-usage-footer: turn: cache read 312k, written 2.0k, uncached 3, out 320; 5h 23.4% → 23.6%
 ```
 
 - The figures are the request's tokens (read from the cache, written to it, uncached input, output) and the 5-hour meter before and after it, with one decimal; `?` where Claude Code had no reading yet. Off a subscription there's no meter part.
-- The `turn:` line appears only with the `logUsage` option, once per turn of the main conversation.
+
+### Usage log (`logUsage`)
+
+With `logUsage` on, the mod appends one JSON line per model request (main conversation and subagents), keep-alive ping and compaction to `~/.claude/logs/usage/<date>-<session id>.jsonl` (under `$CLAUDE_CONFIG_DIR` if that's set). Each line has when the request started, its model and tokens, and the 5-hour and 7-day meters after it with their reset times; no prompt or reply text. `claude-keepalive-report.sh` reads it: see "Does keep-alive save usage on Pro?" below.
+
+```
+{"kind":"request","t":1792044000000,"agent":false,"model":"claude-opus-5-5","read":312000,"write":2000,"input":3,"output":320,"h5":23.6,"h5Reset":"2026-10-19T08:00:00Z","d7":41,"d7Reset":"2026-10-23T00:00:00Z","session":"…"}
+```
+
+Pings add `outcome`; compactions add `trigger` (`keepalive` for the mod's own, `manual`, `auto` or `precompute`) and `tokensBefore`/`tokensAfter` when Claude Code reports them.
 
 ### Status line (`statusline-command.sh`)
 
@@ -153,21 +161,25 @@ With a 5-minute cache, pings 55 minutes apart can't keep anything warm; each one
 
 - The mod only runs while Claude Code is open. If you close the terminal or the PC (or WSL) sleeps, nothing pings and the cache expires as usual.
 - Each open session keeps its own cache warm, and each one costs pings. Close sessions you're done with.
-- Only the main conversation is tracked; subagent requests are ignored.
+- Only the main conversation is kept warm; subagent requests are ignored (the usage log still records them).
 
 ---
 
 ## Does keep-alive save usage on Pro?
 
-Anthropic doesn't publish how Pro and Max limits count cache reads, cache writes and uncached input, so the saving can't be computed from token counts alone. It can be measured: Claude Code receives the plan's 5-hour meter with each response, with one decimal, and the log lines show it before and after each ping, compaction and (with `logUsage`) turn.
+Anthropic doesn't publish how Pro and Max limits count cache reads, cache writes and output, so the saving can't be computed from token counts alone. It can be measured: Claude Code receives the plan's 5-hour and 7-day meters with each response, with one decimal, and the usage log puts them next to each request's tokens.
 
-1. Turn `logUsage` on in `/config`. Use a session with a large context (200k tokens or more). Close other sessions and claude.ai tabs: they share the meter. Don't change the model or effort during the test.
-2. **Warm cost:** send `ok` three times, a few minutes apart. Each `turn:` line shows how far the meter moved for that many cache-read tokens.
-3. **Cold cost:** switch `keepAlive` off, stay idle for more than an hour, then send `ok`, and `ok` once more right after. A response's meter reading may lag one request; the second line shows the rest.
-4. **Ping cost:** switch `keepAlive` back on and stay idle for about an hour; read the ping's line. If its meter never moves while your turns move it, ping responses don't refresh the reading: take the change at your next message instead.
-5. **Compare:** keep-alive saves usage when (pings per idle gap) × (ping cost) < (cold cost). At API price ratios (cache read 0.1×, 1-hour cache write 2× the input price) one cold rebuild costs about as much as 20 pings. If your measured ratio is under about 3, three idle pings no longer pay off: lower `maxIdlePings`.
+Comparing a week with keep-alive against a week without wouldn't show it. Keep-alive only matters for idle gaps of 1–3 hours, a handful a week, and one avoided rebuild of a 150k context is worth a few percent of a week's usage; in this setup's own history daily usage varied more than tenfold and two weeks in a row differed by half. So the report weighs each gap on its own instead: what its pings cost, against the rebuild they avoided. That needs only a period with keep-alive on.
 
-The meter moves in steps of 0.1 %, so repeat each probe a few times. Switch `logUsage` off afterwards; it adds a line to every turn.
+1. Turn `logUsage` on in `/config`, leave keep-alive on, and work as usual for a week or more.
+2. Run `claude-keepalive-report.sh` (in this repo's `bin/`, on `PATH`). It fits what the meters charge per read, written and output token, then adds up the pings against the rebuilds they avoided, one `name<TAB>value` row per figure:
+    - `write_read_ratio`: how many read tokens a written one costs on your plan. At API prices it's 20: one rebuild costs as much as 20 pings.
+    - `rebuilds_avoided`: you came back to a warm cache after more than its lifetime. `chains_wasted`: you came back after it expired anyway, or the session was compacted first.
+    - `ping_net_5h` and `ping_net_7d`: the rebuilds avoided minus all pings, in % of each meter; above 0 keep-alive saves usage. `ping_net_share`: the same as a share of the period's 5-hour use.
+    - `compaction_cost` and `compaction_saving`: the mod's compactions, against rebuilding the full history at the next request. The smaller history of later requests isn't counted.
+3. Run `claude-keepalive-report.sh -w`. It replays the gaps in your transcripts with the fitted weights, one row per `maxIdlePings` value from 0 to 6: the gaps pinged, pings, rebuilds avoided and the net. Set `maxIdlePings` to the best one; if every net is below 0, switch keep-alive off. It also works before there's a log, in API price units.
+
+`fit` says `weights` once the log has 10 hourly windows with meter readings, else `api-ratios` (API price ratios scaled to the meter). Other use of the same account (claude.ai, another computer) moves the meters too and blurs the fit, and Claude Code's own background requests aren't logged. Switch `logUsage` off when you're done; the log takes about 300 bytes per request.
 
 ---
 
@@ -185,7 +197,7 @@ Change them in `/config` (the usage-footer rows). They're stored in `~/.claude/s
 | `minCompactTokens` | `50000` | Smaller contexts aren't compacted; they're left to expire. |
 | `utcOffset` | empty | Empty means the system timezone. Set it (e.g. `+07:00`, from `-12:00` to `+14:00`) if work hours look shifted. |
 | `cacheTtlMinutes` | `60` | Assumed cache lifetime, 2–60. Keep 60; lower it only for a quick test. |
-| `logUsage` | `false` | A log line per turn with its tokens and the 5-hour meter, for the measurement above. |
+| `logUsage` | `false` | Writes each request, ping and compaction with its tokens and both meters to `~/.claude/logs/usage/`, for `claude-keepalive-report.sh` (see "Usage log"). |
 
 ### Quick live test
 
@@ -232,6 +244,7 @@ Options you changed in `/config` live in each machine's own settings; set them a
 
 ```
 statusline-command.sh                    status line script
+bin/claude-keepalive-report.sh           weighs the keep-alive's cost against its saving (logUsage)
 mods/usage-footer/
 ├── .claude-plugin/plugin.json           manifest + userConfig options
 ├── hooks/hooks.json                     points at register.tsx
@@ -249,9 +262,9 @@ Hooks used:
 |---|---|
 | `session.start` | Starts the 30 s timer |
 | `prompt.submit` | Notices your own messages |
-| `turn.start` / `turn.complete` | Tracks whether a turn is running; with `logUsage`, logs the turn's usage |
-| `turn.step` | Records the request start time and effort |
-| `session.compact` | Stops the countdown after a compaction you or Claude Code ran |
+| `turn.start` / `turn.complete` | Tracks whether a turn is running |
+| `turn.step` | Records the request start time and effort; with `logUsage`, logs each request, subagents' too |
+| `session.compact` | Stops the countdown after a compaction you or Claude Code ran; with `logUsage`, logs it |
 | `ui.render` (`SessionMode`) | Draws the footer |
 
 Session values live in `$.state`, so they survive a hot reload of the mod.

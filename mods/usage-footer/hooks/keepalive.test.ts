@@ -5,6 +5,7 @@ import {
   inWindow,
   inWorkTime,
   leadMs,
+  localDate,
   localDay,
   localMinutes,
   parseDays,
@@ -162,6 +163,8 @@ describe('time helpers', () => {
     expect(localDay(utc1730, 420)).toBe(0)
     expect(localMinutes(utc1730, -330)).toBe(12 * 60) // 12:00 Saturday at -05:30
     expect(localDay(utc1730, -330)).toBe(6)
+    expect(localDate(utc1730, 420)).toBe('2026-10-11')
+    expect(localDate(utc1730, -330)).toBe('2026-10-10')
   })
 
   test('inWindow, including a window that wraps midnight and an empty one', async () => {

@@ -6,6 +6,7 @@ import {
   billedInput,
   decide,
   inWorkTime,
+  localDate,
   localMinutes,
   MINUTE_MS,
   parseDays,
@@ -92,8 +93,13 @@ export function modelName(id: string): string {
   return m[3] ? `${family} ${m[2]}.${m[3]}` : `${family} ${m[2]}`
 }
 
-// The 5-hour window's use, with the one decimal the engine reports; undefined off a subscription.
-export const fiveHourUsed = (usage: SessionUsage) => usage.rateLimits.find(r => r.kind === 'five_hour')?.percentUsed
+// A plan window's use, with the one decimal the engine reports, and when it resets; undefined off a subscription.
+export function meter(usage: SessionUsage, kind: 'five_hour' | 'seven_day') {
+  const limit = usage.rateLimits.find(r => r.kind === kind)
+  return { used: limit?.percentUsed, resetsAt: limit?.resetsAt }
+}
+
+export const fiveHourUsed = (usage: SessionUsage) => meter(usage, 'five_hour').used
 
 // 312_456 -> 312k, 2_345 -> 2.3k, 40 -> 40
 export function tokens(n: number): string {
@@ -117,6 +123,34 @@ export function costNote(u: Usage | undefined, before: number | undefined, after
     parts.push(`5h ${percent(before)} → ${percent(after)}`)
   }
   return parts.join('; ')
+}
+
+// One line of the usage log (logUsage), for bin/claude-keepalive-report.sh.
+export type LogRecord = { kind: 'request' | 'ping' | 'compact'; t: number; [field: string]: string | number | boolean | undefined }
+
+// What a request, ping or compaction cost and both meters after it; `t` is when it started.
+export function logRecord(
+  kind: LogRecord['kind'],
+  t: number,
+  u: Usage | undefined,
+  after: SessionUsage,
+  extra: Record<string, string | number | boolean | undefined> = {},
+): LogRecord {
+  const h5 = meter(after, 'five_hour')
+  const d7 = meter(after, 'seven_day')
+  return {
+    kind,
+    t,
+    ...extra,
+    read: u?.cache_read_input_tokens,
+    write: u?.cache_creation_input_tokens,
+    input: u?.input_tokens,
+    output: u?.output_tokens,
+    h5: h5.used,
+    h5Reset: h5.resetsAt,
+    d7: d7.used,
+    d7Reset: d7.resetsAt,
+  }
 }
 
 export type Part = { text: string; color?: string; bold?: boolean; dim?: boolean }
@@ -210,8 +244,44 @@ async function planInput($: EngineInterface, settings: Settings, now: number, us
 
 // Module scope on purpose: a reload drops it with the old module, and one action at a time is enough.
 let acting = false
-// The 5-hour meter when the current turn started, for the logUsage line; a reload loses one line at most.
-let meterAtTurnStart: number | undefined
+// One log write at a time, so a ping's line and a turn's don't overwrite each other.
+let logQueue: Promise<void> = Promise.resolve()
+let logFailed = false
+
+async function logDir($: EngineInterface): Promise<string | undefined> {
+  const configDir = await $.env.get('CLAUDE_CONFIG_DIR')
+  if (configDir) {
+    return `${configDir}/logs/usage`
+  }
+  const home = await $.env.get('HOME')
+  return home ? `${home}/.claude/logs/usage` : undefined
+}
+
+// Appends a record to <config>/logs/usage/<local date>-<session id>.jsonl. $.fs has no append, so
+// the file is read and written whole; one file per session and day keeps it small and unshared.
+function appendLog($: EngineInterface, settings: Settings, record: LogRecord): Promise<void> {
+  if (!settings.logUsage) {
+    return logQueue
+  }
+  logQueue = logQueue
+    .then(async () => {
+      const dir = await logDir($)
+      if (dir === undefined) {
+        return
+      }
+      const session = await $.session.id()
+      const path = `${dir}/${localDate(record.t, settings.utcOffsetMinutes)}-${session}.jsonl`
+      const old = (await $.fs.exists(path)) ? await $.fs.read(path) : ''
+      await $.fs.write(path, `${old}${JSON.stringify({ ...record, session })}\n`)
+    })
+    .catch((error: unknown) => {
+      if (!logFailed) {
+        logFailed = true
+        $.ui.log(`usage-footer: cannot write the usage log (${String(error)}); further failures are not shown`)
+      }
+    })
+  return logQueue
+}
 
 // What one tick acts on: when, and the countdown and meter it saw.
 type Tick = { now: number; at: string; lastRequestAt: number; meterBefore: number | undefined }
@@ -243,7 +313,7 @@ async function act($: EngineInterface, settings: Settings) {
     if (decision === 'ping') {
       await ping($, settings, tick)
     } else {
-      await compact($, tick, p.inWorkHours ? `idle after ${p.keepAlives} pings` : 'idle outside work hours')
+      await compact($, settings, tick, p.inWorkHours ? `idle after ${p.keepAlives} pings` : 'idle outside work hours')
     }
   } finally {
     acting = false
@@ -265,7 +335,9 @@ async function ping($: EngineInterface, settings: Settings, t: Tick) {
     reply = { isAnswered: false, reason: String(error) }
   }
   const outcome = pingOutcome(reply)
-  const cost = costNote(reply.usage, t.meterBefore, fiveHourUsed(await $.session.usage()))
+  const after = await $.session.usage()
+  const cost = costNote(reply.usage, t.meterBefore, fiveHourUsed(after))
+  await appendLog($, settings, logRecord('ping', t.now, reply.usage, after, { outcome }))
 
   if (outcome === 'warm') {
     await update($, failuresAtom, () => 0)
@@ -301,7 +373,7 @@ async function ping($: EngineInterface, settings: Settings, t: Tick) {
 }
 
 // Skipped or failed compactions are not retried until the user types again.
-async function compact($: EngineInterface, t: Tick, why: string) {
+async function compact($: EngineInterface, settings: Settings, t: Tick, why: string) {
   let result: SessionCompactResult | string
   try {
     result = await $.session.compact()
@@ -319,7 +391,13 @@ async function compact($: EngineInterface, t: Tick, why: string) {
   await update($, lastRequestAtAtom, current => (current === t.lastRequestAt ? null : current))
   await update($, keepAlivesAtom, () => 0)
   const u = result.usage
-  const cost = costNote(u, t.meterBefore, fiveHourUsed(await $.session.usage()))
+  const after = await $.session.usage()
+  const cost = costNote(u, t.meterBefore, fiveHourUsed(after))
+  await appendLog(
+    $,
+    settings,
+    logRecord('compact', t.now, u, after, { trigger: 'keepalive', tokensBefore: result.tokensBefore, tokensAfter: result.tokensAfter }),
+  )
   const details = cost === '' ? '' : ` (${cost})`
   if (u !== undefined && billedInput(u) > 0 && wasCacheCold(u)) {
     // The summary request did not share the conversation's cache, so it cost about as much as
@@ -363,17 +441,15 @@ export const register: Register = (on, options) => {
   // Main-thread turns only: a subagent's run raises no turn.start.
   on('turn.start', async ($, e, next) => {
     await update($, busyAtom, () => true)
-    if (settings.logUsage) {
-      meterAtTurnStart = fiveHourUsed(await $.session.usage())
-    }
     return next(e)
   })
 
   // The API measures the cache lifetime from the start of the request that last read
-  // or wrote the entry, so record the time before the request is sent.
+  // or wrote the entry, so record the time before the request is sent. Subagents'
+  // requests count on the plan's meters too, so the usage log has them as well.
   on('turn.step', async function* ($, e, next) {
+    const startedAt = await $.clock.now()
     if (e.agentId === undefined) {
-      const startedAt = await $.clock.now()
       await update($, lastRequestAtAtom, () => startedAt)
       if (e.effort !== undefined) {
         const effort = String(e.effort)
@@ -381,17 +457,18 @@ export const register: Register = (on, options) => {
       }
       $.ui.invalidate('ui.render')
     }
-    return yield* next(e)
+    const result = yield* next(e)
+    if (settings.logUsage && result.usage) {
+      const extra = { agent: e.agentId !== undefined, model: result.usage.model }
+      await appendLog($, settings, logRecord('request', startedAt, result.usage, await $.session.usage(), extra))
+    }
+    return result
   })
 
   // Raised however the turn ended: answered, interrupted, refused or failed.
   on('turn.complete', async ($, e, next) => {
     if (e.agentId === undefined) {
       await update($, busyAtom, () => false)
-      if (settings.logUsage) {
-        const cost = costNote(e.usage, meterAtTurnStart, fiveHourUsed(await $.session.usage()))
-        $.ui.log(`usage-footer: turn: ${cost === '' ? 'no usage reported' : cost}`)
-      }
     }
     $.ui.invalidate('ui.render')
     return next(e)
@@ -400,10 +477,18 @@ export const register: Register = (on, options) => {
   // A compaction the user or the engine ran (the mod's own calls skip this hook): the
   // compacted conversation has no cache yet, and a ping would only re-read the old one.
   on('session.compact', async ($, e, next) => {
+    const startedAt = await $.clock.now()
     const result = await next(e)
-    if (e.agentId === undefined && e.trigger !== 'precompute' && result.messages !== undefined) {
+    if (result.messages === undefined) {
+      return result
+    }
+    if (e.agentId === undefined && e.trigger !== 'precompute') {
       await update($, lastRequestAtAtom, () => null)
       $.ui.invalidate('ui.render')
+    }
+    if (settings.logUsage) {
+      const extra = { trigger: e.trigger, agent: e.agentId !== undefined, tokensBefore: result.tokensBefore, tokensAfter: result.tokensAfter }
+      await appendLog($, settings, logRecord('compact', startedAt, result.usage, await $.session.usage(), extra))
     }
     return result
   }).catch(($, e, next) => next(e)) // the compaction's own result, never run twice

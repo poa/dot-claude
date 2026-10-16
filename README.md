@@ -14,7 +14,7 @@ The repo can live anywhere. `install.sh` writes its location to `CLAUDE_SETUP_DI
 | `mods/` | Mods, one folder each; the `claude` function loads all of them (`CLAUDE_CODE_PLUGIN_DIRS=$CLAUDE_SETUP_DIR/mods`). `mods/usage-footer/`: see [`docs/usage-footer.md`](docs/usage-footer.md) |
 | `settings.json` | Layered over `~/.claude/settings.json` by the `claude` function; see "Settings" |
 | `shell/claude.sh` | Defines the `claude` shell function (this repo's settings and mods) and the shell binding for Ctrl+Enter, and puts `bin/` on `PATH`; sourced from `~/.zshrc` and `~/.bashrc` |
-| `bin/` | Scripts that list, prune and repair sessions in `~/.claude/projects`; see "Session tools" |
+| `bin/` | Scripts that list, prune and repair sessions in `~/.claude/projects` and weigh the keep-alive's usage; see "Session tools" |
 | `lib/sessions.sh` | Functions shared by the `bin/` scripts |
 | `install.sh` | Creates the links, the `CLAUDE_SETUP_DIR` lines in `~/.zshrc` and `~/.bashrc` (whichever exist) and the `post-merge` git hook; safe to re-run, and repoints everything after a move |
 
@@ -115,7 +115,7 @@ Until step 2, the `~/.claude` links point to the old location and the `claude` f
 
 ## Session tools
 
-Scripts in `bin/` for the sessions in `~/.claude/projects` (`$CLAUDE_CONFIG_DIR/projects` if that's set). `shell/claude.sh` puts `bin/` on `PATH`. They need `jq`; `claude-check-cwd.sh -m rewrite` also needs `perl`. `claude-check-cwd.sh` and `claude-short-sessions.sh` take `-h` for options.
+Scripts in `bin/` for the sessions in `~/.claude/projects` (`$CLAUDE_CONFIG_DIR/projects` if that's set). `shell/claude.sh` puts `bin/` on `PATH`. They need `jq`; `claude-check-cwd.sh -m rewrite` also needs `perl`. `claude-check-cwd.sh`, `claude-short-sessions.sh` and `claude-keepalive-report.sh` take `-h` for options.
 
 | Script | What it does |
 |---|---|
@@ -124,6 +124,7 @@ Scripts in `bin/` for the sessions in `~/.claude/projects` (`$CLAUDE_CONFIG_DIR/
 | `claude-short-sessions.sh` | IDs of sessions with at most 3 replies (`-n` to change); `-v` prints them in the `claude-sessions.sh` table. Read-only; its output is meant for `claude-prune.sh`. |
 | `claude-prune.sh` | Deletes sessions by ID or by its first 8 or more characters; refuses a prefix that matches several. Dry run unless the first argument is `--go`. |
 | `claude-check-cwd.sh` | Finds sessions whose recorded working folder doesn't match their project folder (`MISMATCH`) or no longer exists after a rename (`GONE`), and misnamed project folders. `-m rewrite` changes the recorded path, `-m move` moves the session to the folder of its path. Dry run unless `--go`; changed files are backed up to `~/claude-cwd-backup`. |
+| `claude-keepalive-report.sh` | Weighs what the usage-footer keep-alive pings cost on the plan's meters against the cache rebuilds they avoid, from the log its `logUsage` option writes to `~/.claude/logs/usage`; `-w` replays the transcripts for `maxIdlePings` 0–6. Read-only; see "Does keep-alive save usage on Pro?" in [`docs/usage-footer.md`](docs/usage-footer.md#does-keep-alive-save-usage-on-pro). |
 
 - Folder names: Claude Code names a project folder after its path with every character other than a letter or digit replaced by `-` (`/home/me/my_repo.x` becomes `-home-me-my-repo-x`). A folder with any other name is `MISNAMED`: Claude Code never reads it, so its sessions don't appear in `/resume` and its memory isn't loaded. Rename folders only to that form.
 - Prompts are the messages you typed; commands, tool results and summaries don't count. Replies are model responses: one prompt gets several while Claude works.

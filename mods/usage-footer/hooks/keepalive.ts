@@ -66,6 +66,12 @@ export function localDay(now: number, offsetMinutes: number | undefined): number
   return offsetMinutes === undefined ? new Date(now).getDay() : new Date(now + offsetMinutes * MINUTE_MS).getUTCDay()
 }
 
+// The local date as YYYY-MM-DD, with the system timezone when no offset is given.
+export function localDate(now: number, offsetMinutes: number | undefined): string {
+  const offset = offsetMinutes ?? -new Date(now).getTimezoneOffset()
+  return new Date(now + offset * MINUTE_MS).toISOString().slice(0, 10)
+}
+
 // Whether `minutes` lies in [from, until); a window that wraps midnight is allowed, and from == until is empty.
 export function inWindow(minutes: number, from: number, until: number): boolean {
   return from <= until ? minutes >= from && minutes < until : minutes >= from || minutes < until

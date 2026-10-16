@@ -123,25 +123,57 @@ const OK_REPLY = { isAnswered: true, text: 'ok', usage: tokenUsage(300_000, 0) }
 const FAILED_REPLY = { isAnswered: false, reason: 'api-error', status: 529, error: 'overloaded_error', usage: tokenUsage(0, 0, 0) } as const
 const COMPACTED = { messages: [{ role: 'user', text: 'summary of the session', toolUses: [] }], usage: tokenUsage(300_000, 0) }
 
+const H5_RESET = '2026-10-12T08:00:00Z'
+const D7_RESET = '2026-10-16T00:00:00Z'
+
+type StepUsage = ReturnType<typeof tokenUsage> & { model: string }
+
 type World = {
   forks: number
   compactions: number
   logs: string[]
-  // What $.session.usage() reports: the 5-hour meter and the context size.
+  // What $.session.usage() reports: the meters and the context size.
   fiveHour: number
+  sevenDay: number
   contextTokens: number
+  // What the next model request reports; none by default.
+  stepUsage: StepUsage | null
+  // The file system $.fs reaches.
+  files: Map<string, string>
 }
 
 type Stand = {
   fork?: (n: number) => unknown
   compact?: () => unknown
   contextTokens?: number
+  env?: Record<string, string>
+  failWrite?: boolean
 }
 
 // Stand in for the engine beneath the plugin, start the session (arms the 30 s tick)
 // and send one main-thread model request at the clock's current time.
 async function startWithOneRequest($: Engine, on: On, stand: Stand = {}): Promise<World> {
-  const world: World = { forks: 0, compactions: 0, logs: [], fiveHour: 23.4, contextTokens: stand.contextTokens ?? 250_000 }
+  const world: World = {
+    forks: 0,
+    compactions: 0,
+    logs: [],
+    fiveHour: 23.4,
+    sevenDay: 6,
+    contextTokens: stand.contextTokens ?? 250_000,
+    stepUsage: null,
+    files: new Map(),
+  }
+  mock.env(on, stand.env ?? { HOME: '/home/test' })
+  on('session.id', () => ({ value: 'sess-1' }))
+  on('fs.exists', (_, e) => ({ value: world.files.has(e.path) }))
+  on('fs.read', (_, e) => ({ value: world.files.get(e.path) ?? '' }))
+  on('fs.write', (_, e) => {
+    if (stand.failWrite) {
+      throw new Error('EACCES: permission denied')
+    }
+    world.files.set(e.path, e.text)
+    return { value: undefined }
+  })
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('settings.read', () => ({ value: {} }))
   on('session.model', () => ({ value: 'claude-opus-5-5' }))
@@ -149,7 +181,10 @@ async function startWithOneRequest($: Engine, on: On, stand: Stand = {}): Promis
     value: {
       startedAt: 0,
       context: { tokens: world.contextTokens, window: 1_000_000, percent: 25 },
-      rateLimits: [{ kind: 'five_hour', percentUsed: world.fiveHour }],
+      rateLimits: [
+        { kind: 'five_hour', percentUsed: world.fiveHour, resetsAt: H5_RESET },
+        { kind: 'seven_day', percentUsed: world.sevenDay, resetsAt: D7_RESET },
+      ],
     },
   }))
   on('ui.log', (_, e) => {
@@ -168,7 +203,7 @@ async function startWithOneRequest($: Engine, on: On, stand: Stand = {}): Promis
   on('turn.start', (_, e) => ({ turnId: e.turnId }))
   on('turn.complete', (_, e) => ({ text: e.answer }))
   on('turn.step', async function* (_, e) {
-    return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn', usage: null }
+    return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn', usage: world.stepUsage }
   })
 
   await $.session.start({ cwd: '/tmp', surface: 'terminal', isInteractive: true })
@@ -374,16 +409,75 @@ describe('keep-alive tick', () => {
 })
 
 describe('logUsage', () => {
-  test('one line per main-thread turn with its tokens and the 5-hour meter', { options: { ...options, logUsage: true } }, async ($, on) => {
+  const logging = { options: { ...options, logUsage: true } }
+  const LOG = '/home/test/.claude/logs/usage/2026-10-12-sess-1.jsonl'
+  const STEP_USAGE: StepUsage = { ...tokenUsage(312_000, 2_000, 3), output_tokens: 320, model: 'claude-opus-5-5' }
+  const lines = (world: World, path = LOG) =>
+    (world.files.get(path) ?? '')
+      .split('\n')
+      .filter(line => line !== '')
+      .map(line => JSON.parse(line) as Record<string, unknown>)
+
+  test('each request, ping and compaction adds a line to the session log of the day', logging, async ($, on) => {
+    const clock = mock.clock(on, { now: NOON_LOCAL })
+    const world = await startWithOneRequest($, on)
+    expect(world.files.size).toBe(0) // the first request reported no usage
+
+    world.stepUsage = STEP_USAGE
+    world.fiveHour = 10.4
+    await step($, 't2')
+    await clock.advance(56 * MIN) // a ping at 12:55
+    await $.session.compact({ trigger: 'manual', messages: [{ role: 'user', text: 'hello', toolUses: [] }] })
+
+    const logged = lines(world)
+    expect(logged.map(l => l.kind)).toEqual(['request', 'ping', 'compact'])
+    expect(logged[0]).toEqual({
+      kind: 'request',
+      t: NOON_LOCAL,
+      agent: false,
+      model: 'claude-opus-5-5',
+      read: 312_000,
+      write: 2_000,
+      input: 3,
+      output: 320,
+      h5: 10.4,
+      h5Reset: H5_RESET,
+      d7: 6,
+      d7Reset: D7_RESET,
+      session: 'sess-1',
+    })
+    expect(logged[1]).toMatchObject({ kind: 'ping', t: NOON_LOCAL + 55 * MIN, outcome: 'warm', read: 300_000, write: 0 })
+    expect(logged[2]).toMatchObject({ kind: 'compact', t: NOON_LOCAL + 56 * MIN, trigger: 'manual', agent: false, read: 300_000 })
+  })
+
+  test('the log goes under CLAUDE_CONFIG_DIR when that is set', logging, async ($, on) => {
     mock.clock(on, { now: NOON_LOCAL })
+    const world = await startWithOneRequest($, on, { env: { HOME: '/home/test', CLAUDE_CONFIG_DIR: '/cfg' } })
+
+    world.stepUsage = STEP_USAGE
+    await step($, 't2')
+    expect([...world.files.keys()]).toEqual(['/cfg/logs/usage/2026-10-12-sess-1.jsonl'])
+  })
+
+  test('off: nothing is written', { options }, async ($, on) => {
+    const clock = mock.clock(on, { now: NOON_LOCAL })
     const world = await startWithOneRequest($, on)
 
-    world.fiveHour = 10
-    await $.turn.start({ text: 'ok', turnId: 't2' })
-    world.fiveHour = 10.4
-    const turnUsage = { ...tokenUsage(312_000, 2_000, 3), output_tokens: 320, model: 'claude-opus-5-5' }
-    await $.turn.complete({ answer: 'ok', durationMs: 900, isAborted: false, turnId: 't2', reason: 'answer', usage: turnUsage })
+    world.stepUsage = STEP_USAGE
+    await step($, 't2')
+    await clock.advance(56 * MIN)
+    expect(world.forks).toBe(1)
+    expect(world.files.size).toBe(0)
+  })
 
-    expect(world.logs).toContain('usage-footer: turn: cache read 312k, written 2.0k, uncached 3, out 320; 5h 10.0% → 10.4%')
+  test('a log that cannot be written leaves the keep-alive working and says so once', logging, async ($, on) => {
+    const clock = mock.clock(on, { now: NOON_LOCAL })
+    const world = await startWithOneRequest($, on, { failWrite: true })
+
+    world.stepUsage = STEP_USAGE
+    await step($, 't2')
+    await clock.advance(56 * MIN)
+    expect(pings(world).length).toBe(1)
+    expect(world.logs.filter(l => l.includes('cannot write the usage log')).length).toBe(1)
   })
 })

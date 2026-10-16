@@ -1,6 +1,6 @@
 {
   "name": "usage-footer",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Prompt footer with model, effort, context bar, 5h limit and cache countdown; keeps the prompt cache warm during work hours and compacts when idle after them",
   "types": "./types/index.d.ts",
   "userConfig": {
@@ -60,8 +60,8 @@
     },
     "logUsage": {
       "type": "boolean",
-      "title": "Log usage per turn",
-      "description": "Write a dim line after each turn with its cache read/written tokens and the 5-hour meter before and after; for measuring what the keep-alive saves.",
+      "title": "Log usage to a file",
+      "description": "Append each request, keep-alive ping and compaction with its tokens and the 5-hour and 7-day meters to ~/.claude/logs/usage/, for bin/claude-keepalive-report.sh.",
       "default": false
     }
   }
