@@ -10,13 +10,15 @@ The repo can live anywhere. `install.sh` writes its location to `CLAUDE_SETUP_DI
 |---|---|
 | [`global/CLAUDE.md`](global/CLAUDE.md) | Linked as `~/.claude/CLAUDE.md`: instructions for every project |
 | `keybindings.json` | Linked as `~/.claude/keybindings.json` |
+| `agents/` | Subagents; linked as `~/.claude/agents` with `install.sh --agents` (see "Install options") |
 | `statusline-command.sh` | Status line script, run in place (`statusLine` in `settings.json`, through `$CLAUDE_SETUP_DIR`) |
 | `mods/` | Mods, one folder each; the `claude` function loads all of them (`CLAUDE_CODE_PLUGIN_DIRS=$CLAUDE_SETUP_DIR/mods`). `mods/usage-footer/`: see [`docs/usage-footer.md`](docs/usage-footer.md) |
 | `settings.json` | Layered over `~/.claude/settings.json` by the `claude` function; see "Settings" |
-| `shell/claude.sh` | Defines the `claude` shell function (this repo's settings and mods) and the shell binding for Ctrl+Enter, and puts `bin/` on `PATH`; sourced from `~/.zshrc` and `~/.bashrc` |
+| `shell/claude.sh` | Defines the `claude` shell function (this repo's settings and mods; `claude remote-control` gets them as environment variables) and the shell binding for Ctrl+Enter, and puts `bin/` on `PATH`; sourced from `~/.zshrc` and `~/.bashrc` |
+| `docs/` | Notes: [`usage-footer.md`](docs/usage-footer.md), [`remote-control.md`](docs/remote-control.md) |
 | `bin/` | Scripts that list, prune and repair sessions in `~/.claude/projects` and weigh the keep-alive's usage; see "Session tools" |
 | `lib/sessions.sh` | Functions shared by the `bin/` scripts |
-| `install.sh` | Creates the links, the `CLAUDE_SETUP_DIR` lines in `~/.zshrc` and `~/.bashrc` (whichever exist) and the `post-merge` git hook; safe to re-run, and repoints everything after a move |
+| `install.sh` | Creates the links, the `CLAUDE_SETUP_DIR` lines in `~/.zshrc` and `~/.bashrc` (whichever exist) and the `post-merge` git hook; safe to re-run, and repoints everything after a move. Optional parts are switched on by options; see "Install options" |
 
 ## Settings
 
@@ -32,19 +34,20 @@ the settings the session uses
 
 - Different keys: both apply. The `env` blocks are merged variable by variable (tested on 2.1.289, 2026-10-11).
 - Same key in both files: this repo's file wins.
-- Without the function (`command claude`, the IDE extension, the desktop app, scripts), only `~/.claude/settings.json` is loaded: no footer, no status line, default theme and editor mode, and none of the `DISABLE_*` flags from this repo. The proxy still applies, and `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` still turns off telemetry, error reporting, auto-updates and `/bug` (per the Claude Code docs).
+- Without the function (`command claude`, the IDE extension, the desktop app, scripts), only `~/.claude/settings.json` is loaded: no footer, no status line, default theme and editor mode, and none of the `DISABLE_*` flags from this repo. The proxy still applies, and, if it's set, `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` still turns off telemetry, error reporting, auto-updates and `/bug` (per the Claude Code docs). It also turns off Remote Control, which is why `install.sh --remote-control` replaces it with the individual flags in `~/.claude/settings.json`.
+- `claude remote-control` is the exception: Claude Code refuses `--settings` there, so the function runs it without and passes the `env` block of this repo's `settings.json` and the mods as environment variables. The sessions it starts have them, but not the status line, theme or editor mode.
 
 ### What goes where
 
 - Points to a file in this repo (a script, a hook command): `settings.json` here, with the path written as `$CLAUDE_SETUP_DIR/…` (commands run in a shell, which expands it). A new mod needs no setting: put it in its own folder under `mods/`.
 - Same on every machine (privacy flags, `theme`, `editorMode`): `settings.json` here. Applies only to launches through the `claude` function.
-- Differs per machine, or must apply even without the function (proxy, `NO_PROXY`, `SHELL`, `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`): `~/.claude/settings.json` on each machine, copied by hand.
+- Differs per machine, or must apply even without the function (proxy, `NO_PROXY`, `SHELL`, and the privacy flags that must reach the desktop app and IDE too): `~/.claude/settings.json` on each machine, copied by hand.
 - Changed by `/config`, `/model`, `/effort` or plugin options: leave it to Claude Code, which writes it to `~/.claude/settings.json`. A copy here would override your change at every launch. That's now the case for `theme` and `editorMode`: change them in this file, not in `/config`.
 
 ### Current split
 
 - `settings.json` here: `statusLine`, `theme`, `editorMode`, and in `env`: `DISABLE_TELEMETRY`, `DISABLE_ERROR_REPORTING`, `DISABLE_AUTOUPDATER`, `DISABLE_BUG_COMMAND`, `DISABLE_FEEDBACK_COMMAND`, `CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY`.
-- `~/.claude/settings.json`, `env` block: `HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY`, `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`, `SHELL`. The other keys there (`model`, `effortLevel`, `modelSettings`, `voice` and so on) are written by Claude Code.
+- `~/.claude/settings.json`, `env` block: `HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY`, `SHELL`, and either `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` or, after `install.sh --remote-control`, `DISABLE_TELEMETRY`, `DISABLE_ERROR_REPORTING`, `DISABLE_AUTOUPDATER`, `DISABLE_BUG_COMMAND`. The other keys there (`model`, `effortLevel`, `modelSettings`, `voice` and so on) are written by Claude Code.
 
 ### Applying and checking changes
 
@@ -52,12 +55,18 @@ the settings the session uses
 - To see what a running session got, type `! printenv | grep -E 'PROXY|DISABLE|SHELL|PLUGIN_DIRS'` at its prompt.
 
 ### Env block sample
+
+This is what `install.sh --remote-control` leaves. Without Remote Control, `"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"` replaces the four `DISABLE_*` lines.
+
 ```
   "env": {
     "HTTPS_PROXY": "http://localhost:1080",
     "HTTP_PROXY": "http://localhost:1080",
     "NO_PROXY": "localhost, 127.0.0.1, 10.*, 172.16.*, 192.168.*",
-    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+    "DISABLE_TELEMETRY": "1",
+    "DISABLE_ERROR_REPORTING": "1",
+    "DISABLE_AUTOUPDATER": "1",
+    "DISABLE_BUG_COMMAND": "1",
     "SHELL": "/usr/bin/bash"
   },
 
@@ -95,12 +104,23 @@ Notes:
 - To undo, restore the backup or delete the two entries.
 - Without the mapping, `Ctrl+Enter` inserts a new line; `Ctrl+X Enter` sends.
 
+## Install options
+
+`install.sh` without options keeps what the machine already has, and the `post-merge` hook runs it that way after every `git pull`. A new machine gets none of the optional parts. Each option has a `--no-` form that undoes it (`--no-remote-control` sets `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` again and leaves the four flags); `install.sh -h` lists them.
+
+| Option | What it changes |
+|---|---|
+| `--agents` | Links `agents/` as `~/.claude/agents`. `Explore` runs on Haiku and replaces the built-in code search agent; `implementer` runs on Sonnet and carries out an approved plan when you ask for it ("use the implementer agent"). Every launch loads them, the desktop app and IDE extension included. Restart Claude Code after the first link. |
+| `--remote-control` | Lets Remote Control work, so you can steer sessions from the Claude phone app or claude.ai/code (see [`docs/remote-control.md`](docs/remote-control.md)). Edits `env` in `~/.claude/settings.json` (previous copy: `settings.json.bak`): removes `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`, which turns Remote Control off, and sets the flags it implied one by one: `DISABLE_TELEMETRY`, `DISABLE_ERROR_REPORTING`, `DISABLE_AUTOUPDATER`, `DISABLE_BUG_COMMAND`. Existing values are kept. Needs `jq`. Restart Claude Code sessions afterwards. |
+
+The model split (Opus plans, Sonnet implements) isn't an option, because Claude Code stores the model in `~/.claude/settings.json` itself. Run `/model sonnet`, `/effort high`, then `/model opusplan` and press Enter. Plan mode then runs on Opus at its saved effort, and the work after you approve a plan runs on Sonnet at `high`. `/model opus` undoes it.
+
 ## New machine
 
 1. Install `git`, `jq` and a Nerd Font (for the status line icons).
 2. Clone the repo anywhere, for example to `~/git/pers/dot-claude`.
-3. Run `install.sh` from the clone. If it reports `DRIFT`, the machine already has a different `~/.claude/CLAUDE.md` or `keybindings.json`: merge it into the repo, delete the original and run the script again.
-4. Add the `env` variables listed in "Current split" to `~/.claude/settings.json` (see "Env block sample"), copying the values from another machine and adjusting the proxy. Don't add `CLAUDE_CODE_PLUGIN_DIRS` or `statusLine` there.
+3. Run `install.sh` from the clone, with the options you want (see "Install options"). If it reports `DRIFT`, the machine already has a different `~/.claude/CLAUDE.md` or `keybindings.json`: merge it into the repo, delete the original and run the script again.
+4. Add the `env` variables listed in "Current split" to `~/.claude/settings.json` (see "Env block sample"), copying the values from another machine and adjusting the proxy. If you want Remote Control, run `install.sh --remote-control` instead of adding `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`. Don't add `CLAUDE_CODE_PLUGIN_DIRS` or `statusLine` there.
 5. On Windows, add the Windows Terminal mapping from "Keys".
 6. Open a new terminal (or run `exec zsh`) and start `claude`. Check with `whence -v claude` (zsh) or `type claude` (bash): it must show a shell function.
 
@@ -133,7 +153,7 @@ Scripts in `bin/` for the sessions in `~/.claude/projects` (`$CLAUDE_CONFIG_DIR/
 
 ## Day to day
 
-- Edits to linked or in-place files (`/memory` → user memory, keybindings, the mod, the status line script) land in the repo: commit and push. The repo is public, [`global/CLAUDE.md`](global/CLAUDE.md) included: check `git diff` for private details before you commit. Auto memory stays in `~/.claude/projects/`, outside the repo.
+- Edits to linked or in-place files (`/memory` → user memory, keybindings, agents, the mod, the status line script) land in the repo: commit and push. The repo is public, [`global/CLAUDE.md`](global/CLAUDE.md) included: check `git diff` for private details before you commit. Auto memory stays in `~/.claude/projects/`, outside the repo.
 - `git pull` on another machine re-runs `install.sh` through the hook. Restart Claude Code to pick up settings changes; mod edits hot-reload.
 - `DRIFT` from `install.sh`: something replaced a link with a regular file. Diff the two, merge into the repo, delete the file and re-run.
 - Mod checks: `claude plugin validate mods/usage-footer` and `claude plugin test mods/usage-footer`.

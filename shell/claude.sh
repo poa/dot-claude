@@ -4,8 +4,16 @@
 
 # claude: layers this repo's settings.json over ~/.claude/settings.json (env keys from both are merged)
 # and loads every mod under mods/ (a folder of plugins).
+# `claude remote-control` refuses --settings, so it gets the env block of settings.json (and the mods) as
+# environment variables instead; the sessions it starts inherit them, but not the status line, theme or editor mode.
 unalias claude 2>/dev/null
 claude() {
+  if [ "$1" = remote-control ] && command -v jq >/dev/null 2>&1; then
+    local vars=() kv
+    while IFS= read -r kv; do vars+=("$kv"); done < <(jq -r '.env // {} | to_entries[] | "\(.key)=\(.value)"' "$CLAUDE_SETUP_DIR/settings.json")
+    env "${vars[@]}" CLAUDE_CODE_PLUGIN_DIRS="$CLAUDE_SETUP_DIR/mods" claude "$@"
+    return
+  fi
   CLAUDE_CODE_PLUGIN_DIRS="$CLAUDE_SETUP_DIR/mods" \
     command claude --settings "$CLAUDE_SETUP_DIR/settings.json" "$@"
 }
