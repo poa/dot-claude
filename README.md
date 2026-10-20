@@ -165,7 +165,7 @@ Until step 2, the `~/.claude` links point to the old location and the `claude` f
 
 ## Session tools
 
-Scripts in `bin/` for the sessions in `~/.claude/projects` (`$CLAUDE_CONFIG_DIR/projects` if that's set). `shell/claude.sh` puts `bin/` on `PATH`. They need `jq`; `claude-check-cwd.sh -m rewrite` also needs `perl`. `claude-check-cwd.sh`, `claude-short-sessions.sh` and `claude-keepalive-report.sh` take `-h` for options.
+Scripts in `bin/` for the sessions in `~/.claude/projects` (`$CLAUDE_CONFIG_DIR/projects` if that's set). `shell/claude.sh` puts `bin/` on `PATH`. They need `jq`; `claude-check-cwd.sh -m rewrite` also needs `perl`. `claude-check-cwd.sh`, `claude-short-sessions.sh`, `claude-keepalive-report.sh` and `claude-compare-instructions.sh` take `-h` for options.
 
 | Script | What it does |
 |---|---|
@@ -175,6 +175,7 @@ Scripts in `bin/` for the sessions in `~/.claude/projects` (`$CLAUDE_CONFIG_DIR/
 | `claude-prune.sh` | Deletes sessions by ID or by its first 8 or more characters; refuses a prefix that matches several. Dry run unless the first argument is `--go`. |
 | `claude-check-cwd.sh` | Finds sessions whose recorded working folder doesn't match their project folder (`MISMATCH`) or no longer exists after a rename (`GONE`), and misnamed project folders. `-m rewrite` changes the recorded path, `-m move` moves the session to the folder of its path. Dry run unless `--go`; changed files are backed up to `~/claude-cwd-backup`. |
 | `claude-keepalive-report.sh` | Weighs what the usage-footer keep-alive pings cost on the plan's meters against the cache rebuilds they avoid, from the log its `logUsage` option writes to `~/.claude/logs/usage`; `-w` replays the transcripts for `maxIdlePings` 0–6. Read-only; see "Does keep-alive save usage on Pro?" in [`docs/usage-footer.md`](docs/usage-footer.md#does-keep-alive-save-usage-on-pro). |
+| `claude-compare-instructions.sh` | A/B test of instruction sets (a plugin, a rules file) on replayed tasks: `run` starts headless sessions per task and arm in throwaway git worktrees of a base commit, with your `CLAUDE.md` loaded, and records cost, output tokens, time, diff size and a check result; `report` gives the change per arm; `blind` writes unlabeled diff pairs to review. Tasks, results and the plugin clone live in `~/.claude/ab/`, outside the repo (task prompts may name private projects). |
 
 - Folder names: Claude Code names a project folder after its path with every character other than a letter or digit replaced by `-` (`/home/me/my_repo.x` becomes `-home-me-my-repo-x`). A folder with any other name is `MISNAMED`: Claude Code never reads it, so its sessions don't appear in `/resume` and its memory isn't loaded. Rename folders only to that form.
 - In Git Bash, sessions record Windows paths (`C:\Users\me\my_repo` is in the folder `C--Users-me-my-repo`). The scripts show them as `C:/Users/me/my_repo`, `-m rewrite` writes them back in the recorded form, and running sessions are found with `tasklist`.
