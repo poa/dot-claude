@@ -10,6 +10,7 @@ input=$(cat)
 # Warn when the prompt cache is not the 1-hour one (e.g. usage overage drops it to 5m):
 # the usage-footer keep-alive pings assume a 1-hour lifetime.
 ttl=$(jq -r '.prompt_cache.ttl // empty' <<<"$input" 2>/dev/null)
+ttl=${ttl%$'\r'}  # a native jq.exe (Git Bash on Windows) ends its output with CRLF
 ttl_segment=""
 if [ -n "$ttl" ] && [ "$ttl" != "1h" ]; then
     ttl_segment=$(printf ' \033[01;31mcache %s\033[00m' "$ttl")
@@ -17,7 +18,7 @@ fi
 
 chroot="${debian_chroot:+($debian_chroot)}"
 user=$(whoami)
-host=$(hostname -s)
+host=${HOSTNAME%%.*}  # bash sets HOSTNAME; Windows' hostname.exe has no -s
 dir=$(pwd)
 
 git_segment=""

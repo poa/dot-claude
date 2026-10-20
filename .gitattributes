@@ -1,0 +1,2 @@
+# LF everywhere, also in a Windows clone: bash stops at the CR of a CRLF line
+* text=auto eol=lf

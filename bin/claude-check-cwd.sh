@@ -89,7 +89,8 @@ for d in "$base"/*/; do
       echo "    rewrite cwd: $fc -> $pp"
       if [ $go -eq 1 ]; then
         mkdir -p "$backup/$name"; cp -p -- "$f" "$backup/$name/"
-        OLD="$fc" NEW="$pp" perl -pi -e 's#"cwd":"\Q$ENV{OLD}\E(?=["/])#"cwd":"$ENV{NEW}#g' "$f"
+        OLD=$(json_path "$fc") NEW=$(json_path "$pp") SEP=$(json_path /) \
+          perl -pi -e 's#"cwd":"\Q$ENV{OLD}\E(?="|\Q$ENV{SEP}\E)#"cwd":"$ENV{NEW}#g' "$f"
         touch -r "$backup/$name/$(basename "$f")" "$f"      # keep the original modified time
         if [ "$(first_cwd "$f")" = "$pp" ]; then fixed=$((fixed+1)); else echo "    WARNING: still inconsistent"; fi
       fi

@@ -16,9 +16,10 @@ The repo can live anywhere. `install.sh` writes its location to `CLAUDE_SETUP_DI
 | `settings.json` | Layered over `~/.claude/settings.json` by the `claude` function; see "Settings" |
 | `shell/claude.sh` | Defines the `claude` shell function (this repo's settings and mods; `claude remote-control` gets them as environment variables) and the shell binding for Ctrl+Enter, and puts `bin/` on `PATH`; sourced from `~/.zshrc` and `~/.bashrc` |
 | `docs/` | Notes: [`usage-footer.md`](docs/usage-footer.md), [`remote-control.md`](docs/remote-control.md) |
-| `bin/` | Scripts that list, prune and repair sessions in `~/.claude/projects` and weigh the keep-alive's usage; see "Session tools" |
+| `bin/` | Scripts that list, prune and repair sessions in `~/.claude/projects`, weigh the keep-alive's usage, and A/B test instruction sets; see "Session tools" |
 | `lib/sessions.sh` | Functions shared by the `bin/` scripts |
 | `install.sh` | Creates the links, the `CLAUDE_SETUP_DIR` lines in `~/.zshrc` and `~/.bashrc` (whichever exist) and the `post-merge` git hook; safe to re-run, and repoints everything after a move. Optional parts are switched on by options; see "Install options" |
+| `.gitattributes` | Keeps LF line endings in every clone, Windows included: bash fails on CRLF scripts |
 
 ## Settings
 
@@ -94,8 +95,8 @@ Windows Terminal sends `Ctrl+Enter` as plain `Enter`, so Claude Code can't tell 
     ]
     ```
 4. Save. Windows Terminal reloads the file by itself; if it shows a settings error, the JSON is broken: restore the backup.
-5. Run `exec zsh` in open tabs so the shell binding from `shell/claude.sh` loads.
-6. Test: in Claude Code, `Ctrl+Enter` sends and `Enter` inserts a new line; at a zsh prompt, `Ctrl+Enter` runs the command like `Enter`.
+5. Run `exec zsh` (or `exec bash`) in open tabs so the shell binding from `shell/claude.sh` loads.
+6. Test: in Claude Code, `Ctrl+Enter` sends and `Enter` inserts a new line; at a zsh or bash prompt, `Ctrl+Enter` runs the command like `Enter`.
 
 Notes:
 
@@ -122,7 +123,36 @@ The model split (Opus plans, Sonnet implements) isn't an option, because Claude 
 3. Run `install.sh` from the clone, with the options you want (see "Install options"). If it reports `DRIFT`, the machine already has a different `~/.claude/CLAUDE.md` or `keybindings.json`: merge it into the repo, delete the original and run the script again.
 4. Add the `env` variables listed in "Current split" to `~/.claude/settings.json` (see "Env block sample"), copying the values from another machine and adjusting the proxy. If you want Remote Control, run `install.sh --remote-control` instead of adding `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`. Don't add `CLAUDE_CODE_PLUGIN_DIRS` or `statusLine` there.
 5. On Windows, add the Windows Terminal mapping from "Keys".
-6. Open a new terminal (or run `exec zsh`) and start `claude`. Check with `whence -v claude` (zsh) or `type claude` (bash): it must show a shell function.
+6. Open a new terminal (or run `exec zsh` or `exec bash`) and start `claude`. Check with `whence -v claude` (zsh) or `type claude` (bash): it must show a shell function.
+
+### Windows (Git Bash)
+
+The same steps work in Git Bash, with native Claude Code (not under WSL, which is Linux). Run them all in Git Bash:
+
+- Install [Git for Windows](https://git-scm.com/downloads/win), Claude Code (`irm https://claude.ai/install.ps1 | iex` in PowerShell) and `jq` (`winget install jqlang.jq`). Git for Windows brings `perl`.
+- Turn on Developer Mode (Settings > System > For developers) before `install.sh`. Without it, only an administrator can make symlinks, and `install.sh` stops rather than copy the files: a copy wouldn't bring `/memory` edits back to the repo.
+- `install.sh` writes the setup lines to `~/.bashrc`, and creates that file if there's none. On its next start Git Bash adds a `~/.bash_profile` that loads it, with a one-time warning.
+- In `~/.claude/settings.json`, leave out `SHELL`. If Claude Code doesn't find Git Bash, add `"CLAUDE_CODE_GIT_BASH_PATH": "C:\\Program Files\\Git\\bin\\bash.exe"` to `env` instead.
+- A clone made before `.gitattributes` existed has CRLF files that bash can't run. Commit or stash your changes, then run `git rm -rq --cached . && git reset -q --hard`.
+
+How it works:
+
+- Claude Code, `jq` and `git` are Windows programs there, and Git Bash rewrites arguments that start with `/` for them (`/init` becomes `C:/Program Files/Git/init`). The `claude` function gives Claude Code this repo's paths as `C:/…` and doubles the slash of arguments that aren't existing paths, so `claude "/init"` works. For other Windows programs, double the slash yourself, or set `MSYS_NO_PATHCONV=1` and `MSYS2_ARG_CONV_EXCL='*'` on that one command; exported, they would also stop the conversion for Claude Code's own commands.
+- A native `jq.exe` ends its lines with CRLF; the scripts drop the CR.
+- The status line runs through Git Bash, like on Linux.
+- The session tools read Windows sessions: see "Session tools".
+
+#### Repo in WSL
+
+Windows Claude Code can use a clone that lives in WSL, so both sides share one copy. Run `./install.sh` in Git Bash from the clone's Windows path, `//wsl.localhost/<distro>/home/<you>/…`: the `~/.claude` links on `C:` then point into WSL, and `CLAUDE_SETUP_DIR` is that path.
+
+- Windows follows these links while its local-to-remote symlink evaluation is on, which is the default. Check with `fsutil behavior query SymlinkEvaluation` as administrator.
+- Windows reads and writes the WSL files as the distro's default user (`wsl -d <distro> whoami` in PowerShell). If that's root, a file Windows creates there, such as a new agent from `/agents`, belongs to root and you can't edit it from WSL. Run `wsl --manage <distro> --set-default-user <you>`, then `wsl --terminate <distro>`.
+- Opening Git Bash starts WSL, because the setup lines read `shell/claude.sh` from it; the first start takes a few seconds.
+- Start Claude Code in folders on `C:`. In a folder in WSL, Windows `git` is slow and the status line takes over a second.
+- Run git in WSL only. Git for Windows refuses the folder for "dubious ownership", and, with the executable bits the Linux clone tracks (`core.filemode`), would list every script as changed.
+- The git hook runs `install.sh` only in WSL: `install.sh` in Git Bash doesn't write it, since a file written from Windows there isn't executable. After a pull that adds a linked file, run `./install.sh` in Git Bash too.
+- Each side's session tools see only that side's `~/.claude`.
 
 ## Moving the repo
 
@@ -147,6 +177,7 @@ Scripts in `bin/` for the sessions in `~/.claude/projects` (`$CLAUDE_CONFIG_DIR/
 | `claude-keepalive-report.sh` | Weighs what the usage-footer keep-alive pings cost on the plan's meters against the cache rebuilds they avoid, from the log its `logUsage` option writes to `~/.claude/logs/usage`; `-w` replays the transcripts for `maxIdlePings` 0–6. Read-only; see "Does keep-alive save usage on Pro?" in [`docs/usage-footer.md`](docs/usage-footer.md#does-keep-alive-save-usage-on-pro). |
 
 - Folder names: Claude Code names a project folder after its path with every character other than a letter or digit replaced by `-` (`/home/me/my_repo.x` becomes `-home-me-my-repo-x`). A folder with any other name is `MISNAMED`: Claude Code never reads it, so its sessions don't appear in `/resume` and its memory isn't loaded. Rename folders only to that form.
+- In Git Bash, sessions record Windows paths (`C:\Users\me\my_repo` is in the folder `C--Users-me-my-repo`). The scripts show them as `C:/Users/me/my_repo`, `-m rewrite` writes them back in the recorded form, and running sessions are found with `tasklist`.
 - Prompts are the messages you typed; commands, tool results and summaries don't count. Replies are model responses: one prompt gets several while Claude works.
 - The scripts never change or delete a session whose Claude Code process is running (they check `~/.claude/sessions`). Close other sessions before `claude-check-cwd.sh --go` anyway.
 - The output is a plain table, one row per session or folder, for `cut`, `awk` and `sort`. On a terminal narrower than the table, lines are cut at its width instead of wrapping; piped output is never cut. Pipe to `less -S` to scroll sideways.

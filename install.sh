@@ -5,6 +5,24 @@ set -euo pipefail
 repo=$(dirname "$(readlink -f "$0")")
 rc=0
 
+# Git Bash (or Cygwin) on Windows: ln -s copies unless told to make real Windows links, and a native
+# jq.exe ends its lines with CRLF
+case $OSTYPE in
+  msys* | cygwin*)
+    windows=1
+    export MSYS="${MSYS:-} winsymlinks:nativestrict" CYGWIN="${CYGWIN:-} winsymlinks:nativestrict"
+    jq() { command jq "$@" | tr -d '\r'; return "${PIPESTATUS[0]}"; }
+    ;;
+  *) windows=0 ;;
+esac
+
+# symlink <target> <link>: ln -sfn, saying what Windows needs when it refuses
+symlink() {
+  ln -sfn "$1" "$2" && return 0
+  [[ $windows = 0 ]] || echo "Windows makes symlinks only with Developer Mode on (Settings > System > For developers) or as administrator" >&2
+  return 1
+}
+
 usage() {
   cat <<'EOF'
 Usage: install.sh [--agents | --no-agents] [--remote-control | --no-remote-control]
@@ -48,7 +66,7 @@ link() {
     else echo "DRIFT: $dst differs from $1; merge it into the repo and re-run" >&2; return 1
     fi
   fi
-  ln -sfn "$src" "$dst"
+  symlink "$src" "$dst"
 }
 
 mkdir -p ~/.claude
@@ -71,7 +89,7 @@ agents_link() {
     echo "DRIFT: $dst is a file; remove it and re-run" >&2
     return 1
   fi
-  ln -sfn "$repo/agents" "$dst"
+  symlink "$repo/agents" "$dst" || return 1
   [[ $before = "$repo/agents" ]] || echo "Linked $dst to agents/; restart Claude Code"
 }
 # Without the option, an existing link is repointed (the repo may have moved) and no link stays no link
@@ -100,6 +118,8 @@ if [[ $remote != keep ]]; then remote_control "$remote" || rc=1; fi
 # Shell setup: export CLAUDE_SETUP_DIR (this repo) and source shell/claude.sh, at the end of each existing rc file.
 # Older or moved copies of these lines are replaced.
 block=$(printf '# Claude Code setup\nexport CLAUDE_SETUP_DIR=%q\n[ -f "$CLAUDE_SETUP_DIR/shell/claude.sh" ] && . "$CLAUDE_SETUP_DIR/shell/claude.sh"' "$repo")
+# A new Git Bash has no ~/.bashrc; on its next start it adds a ~/.bash_profile that loads this one
+if [[ $windows = 1 && ! -e ~/.bashrc && ! -e ~/.zshrc ]]; then : > ~/.bashrc; echo "Created ~/.bashrc"; fi
 found=0
 for rcfile in ~/.zshrc ~/.bashrc; do
   [[ -e $rcfile ]] || continue
@@ -117,6 +137,17 @@ for rcfile in ~/.zshrc ~/.bashrc; do
 done
 [[ $found = 1 ]] || { printf 'No ~/.zshrc or ~/.bashrc; add these lines to your shell rc file:\n%s\n' "$block" >&2; rc=1; }
 
-# Re-run after every git pull
-ln -sfn ../../install.sh "$repo/.git/hooks/post-merge"
+# Re-run after every git pull: a script rather than a link to install.sh, which would get the hook's
+# argument (the squash flag) as an option. Git runs hooks from the top of the work tree.
+# Git Bash on a clone in WSL leaves it to WSL's install.sh: a file written from Windows there isn't
+# executable, and git skips such a hook.
+hook=$repo/.git/hooks/post-merge
+hook_text=$'#!/bin/sh\n# Written by install.sh\nexec ./install.sh'
+if [[ $windows = 1 && ( $repo == //wsl.localhost/* || $repo == //wsl\$/* ) ]]; then
+  :
+elif [[ -L $hook || ! -f $hook || $(cat "$hook") != "$hook_text" ]]; then
+  rm -f "$hook"    # first, so that writing doesn't go through an old link into install.sh
+  printf '%s\n' "$hook_text" > "$hook"
+  chmod +x "$hook"
+fi
 exit $rc

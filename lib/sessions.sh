@@ -1,44 +1,72 @@
 # Functions and defaults shared by the bin/claude-*.sh scripts. Bash only; the scripts source it.
 
+# windows: 1 in Git Bash (or Cygwin). Claude Code is a Windows program there: it records paths as
+# C:\Users\me\x and runs under Windows process IDs. The scripts handle paths as C:/Users/me/x.
+case $OSTYPE in msys* | cygwin*) windows=1 ;; *) windows=0 ;; esac
+
 claude_dir=${CLAUDE_CONFIG_DIR:-$HOME/.claude}
+[ $windows = 0 ] || claude_dir=$(cygpath -u "$claude_dir")
 base=$claude_dir/projects
+# home_path: the home folder as sessions record it
+home_path=$HOME
+[ $windows = 0 ] || home_path=$(cygpath -m "$HOME")
+
+# A native jq.exe ends its lines with CRLF; drop the CRs so values compare as on Linux
+if [ $windows = 1 ]; then jq() { command jq "$@" | tr -d '\r'; return "${PIPESTATUS[0]}"; }; fi
 
 # need "$@": in an option loop, fail unless the option in $1 has a value
 need() { [ $# -ge 2 ] || { echo "Missing value for $1" >&2; exit 1; }; }
 
 # enc <path>: the project folder name Claude Code uses for a path: every character
-# other than a letter or digit becomes "-" (/home/me/my_repo -> -home-me-my-repo)
+# other than a letter or digit becomes "-" (/home/me/my_repo -> -home-me-my-repo, C:/Users/me -> C--Users-me)
 enc() { printf '%s' "${1//[^A-Za-z0-9]/-}"; }
 
 # short <folder name>: the name without the home folder part (-home-me-git-x -> git-x)
-short() { local h; h=$(enc "$HOME"); printf '%s' "${1#"$h"-}"; }
+short() { local h; h=$(enc "$home_path"); printf '%s' "${1#"$h"-}"; }
 
 # tilde <path>: the path with the home folder written as ~
-tilde() { case $1 in "$HOME" | "$HOME"/*) printf '~%s' "${1#"$HOME"}" ;; *) printf '%s' "$1" ;; esac; }
+tilde() {
+  local h
+  for h in "$HOME" "$home_path"; do
+    case $1 in "$h" | "$h"/*) printf '~%s' "${1#"$h"}"; return ;; esac
+  done
+  printf '%s' "$1"
+}
 
 # first_cwd <session file>: the working folder the session started in
-first_cwd() { grep -m1 -o '"cwd":"[^"]*"' "$1" | cut -d'"' -f4; }
+first_cwd() {
+  local c
+  c=$(grep -m1 -o '"cwd":"[^"]*"' "$1" | cut -d'"' -f4)
+  c=${c%%$'\n'*}                        # -o prints every match on that line
+  [ $windows = 0 ] || c=${c//\\\\//}    # C:\\Users\\me in the JSON
+  printf '%s\n' "$c"
+}
+
+# json_path <path>: the path as session files write it (C:\\Users\\me on Windows)
+json_path() { if [ $windows = 1 ]; then printf '%s' "${1//\//\\\\}"; else printf '%s' "$1"; fi; }
 
 # decode <folder name>: rebuild the real path by testing the filesystem;
-# each "-" in the name may have been "/", "-", "." or "_"
+# each "-" in the name may have been "/", "-", ".", "_" or a space (C-- at the start: the drive C:/)
 decode() {
-  local rest=${1#-} IFS=-
+  local rest=${1#-} root="" IFS=-
   local -a parts
+  if [ $windows = 1 ] && [[ $1 =~ ^([A-Za-z])--(.*)$ ]]; then root=${BASH_REMATCH[1]}:; rest=${BASH_REMATCH[2]}; fi
   read -ra parts <<< "$rest"
   _walk() {
     local path=$1; shift
     if [ $# -eq 0 ]; then [ -d "$path" ] && echo "$path" && return 0 || return 1; fi
     local acc=$1; shift
     # finish this segment here (a "/" boundary) ...
-    if [ -e "$path/$acc" ]; then _walk "$path/$acc" "$@" && return 0; fi
-    # ... or extend it with -, . or _ plus the next part
-    if [ $# -gt 0 ]; then
+    if [ -n "$acc" ] && [ -e "$path/$acc" ]; then _walk "$path/$acc" "$@" && return 0; fi
+    # ... or extend it with -, ., _ or a space plus the next part, if a name in $path starts with it
+    # (an empty one: the segment starts with one of them, as .claude does)
+    if [ $# -gt 0 ] && { [ -z "$acc" ] || compgen -G "$path/$acc?*" >/dev/null; }; then
       local n=$1 s; shift
-      for s in - . _; do _walk "$path" "$acc$s$n" "$@" && return 0; done
+      for s in - . _ ' '; do _walk "$path" "$acc$s$n" "$@" && return 0; done
     fi
     return 1
   }
-  [ ${#parts[@]} -gt 0 ] && _walk "" "${parts[@]}"
+  [ ${#parts[@]} -gt 0 ] && _walk "$root" "${parts[@]}"
 }
 
 # project_path <folder>: sets proj_path to the folder's real path and proj_src to how it was found:
@@ -63,12 +91,16 @@ project_path() {
 
 # live_sessions: IDs of the sessions whose Claude Code process is still running, one per line
 live_sessions() {
-  local f pid
+  local f pid winpids=""
+  # Windows process IDs, which kill -0 doesn't see (the variables stop Git Bash from reading /FO as a path)
+  [ $windows = 0 ] || winpids=$(MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' tasklist /FO CSV /NH 2>/dev/null | cut -d'"' -f4)
   for f in "$claude_dir"/sessions/*.json; do
     [ -e "$f" ] || continue
     pid=$(basename "$f" .json)
     case $pid in '' | *[!0-9]*) continue ;; esac
-    kill -0 "$pid" 2>/dev/null && jq -r '.sessionId // empty' "$f"
+    if [ $windows = 1 ]; then in_list "$pid"$'\n' "$winpids"$'\n' || continue
+    else kill -0 "$pid" 2>/dev/null || continue; fi
+    jq -r '.sessionId // empty' "$f"
   done
 }
 
