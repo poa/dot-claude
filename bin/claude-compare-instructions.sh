@@ -93,7 +93,8 @@ run_one() {
   otok=$(jq -r '.usage.output_tokens // 0' "$json" 2>/dev/null || echo 0)
   turns=$(jq -r '.num_turns // 0' "$json" 2>/dev/null || echo 0)
   err=$(jq -r '.is_error' "$json" 2>/dev/null || echo true)
-  git -C "$wt" add -A -- . ':!*lock*' ':!*.lock'
+  # lock files only: a bare *lock* would also drop clock.ts or blocks/
+  git -C "$wt" add -A -- . ':!*.lock' ':!*-lock.json' ':!*-lock.yaml' ':!*.lockb'
   git -C "$wt" diff --cached "$rev" > "$out/diffs/$name.$arm.$n.diff"
   read -r added removed files < <(git -C "$wt" diff --cached --numstat "$rev" | awk '{a+=$1;r+=$2;f++} END{print a+0,r+0,f+0}')
   if (cd "$wt" && bash -c "$check" > "$out/json/$name.$arm.$n.check" 2>&1); then pass=1; else pass=0; fi
