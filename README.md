@@ -189,3 +189,4 @@ Scripts in `bin/` for the sessions in `~/.claude/projects` (`$CLAUDE_CONFIG_DIR/
 - `git pull` on another machine re-runs `install.sh` through the hook. Restart Claude Code to pick up settings changes; mod edits hot-reload.
 - `DRIFT` from `install.sh`: something replaced a link with a regular file. Diff the two, merge into the repo, delete the file and re-run.
 - Mod checks: `claude plugin validate mods/usage-footer` and `claude plugin test mods/usage-footer`.
+- Session script checks: `tests/sessions.sh` runs the scripts that change or delete sessions on fake ones in a scratch folder, never on `~/.claude`.
