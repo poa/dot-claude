@@ -11,6 +11,8 @@ base=$claude_dir/projects
 home_path=$HOME
 [ $windows = 0 ] || home_path=$(cygpath -m "$HOME")
 
+# Without jq every session would look empty and none running, so prune would delete them all
+command -v jq >/dev/null || { echo "jq is needed" >&2; exit 1; }
 # A native jq.exe ends its lines with CRLF; drop the CRs so values compare as on Linux
 if [ $windows = 1 ]; then jq() { command jq "$@" | tr -d '\r'; return "${PIPESTATUS[0]}"; }; fi
 

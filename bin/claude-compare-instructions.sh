@@ -125,7 +125,7 @@ do_run() {
   case ,$arms, in *,plugin,*) [ -d "$plugin" ] || { echo "Arm plugin needs --plugin DIR" >&2; exit 1; } ;; esac
   case ,$arms, in *,rules,*) [ -f "$rules" ] || { echo "Arm rules needs --rules FILE" >&2; exit 1; } ;; esac
   case ,$arms, in *,mine,*) [ -f "$mine" ] || { echo "Arm mine needs --mine FILE" >&2; exit 1; } ;; esac
-  command -v claude >/dev/null && command -v jq >/dev/null || { echo "claude and jq are needed" >&2; exit 1; }
+  command -v claude >/dev/null || { echo "claude is needed" >&2; exit 1; }
   [ -n "$out" ] || out=$ab_dir/$(date +%F-%H%M)
   # worktrees stay out of ~/.claude: Claude Code refuses edits there as sensitive
   wtroot=$(mktemp -d)
