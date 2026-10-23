@@ -138,9 +138,13 @@ type World = {
   contextTokens: number
   // What the next model request reports; none by default.
   stepUsage: StepUsage | null
-  // The file system $.fs reaches.
+  // The file system $.fs reaches, by posixPath.
   files: Map<string, string>
 }
+
+// On Windows the engine hands the file hooks /cfg/x as C:\cfg\x, or \\server\share\cfg\x from a
+// network folder; back to /cfg/x, so the tests expect the same paths everywhere.
+const posixPath = (path: string) => path.replace(/\\/g, '/').replace(/^(\/\/[^/]+\/[^/]+|[A-Za-z]:)/, '')
 
 type Stand = {
   fork?: (n: number) => unknown
@@ -165,13 +169,13 @@ async function startWithOneRequest($: Engine, on: On, stand: Stand = {}): Promis
   }
   mock.env(on, stand.env ?? { HOME: '/home/test' })
   on('session.id', () => ({ value: 'sess-1' }))
-  on('fs.exists', (_, e) => ({ value: world.files.has(e.path) }))
-  on('fs.read', (_, e) => ({ value: world.files.get(e.path) ?? '' }))
+  on('fs.exists', (_, e) => ({ value: world.files.has(posixPath(e.path)) }))
+  on('fs.read', (_, e) => ({ value: world.files.get(posixPath(e.path)) ?? '' }))
   on('fs.write', (_, e) => {
     if (stand.failWrite) {
       throw new Error('EACCES: permission denied')
     }
-    world.files.set(e.path, e.text)
+    world.files.set(posixPath(e.path), e.text)
     return { value: undefined }
   })
   on('session.start', (_, e) => ({ cwd: e.cwd }))
