@@ -6,11 +6,12 @@
 - Don't open with filler ("Done", "Great question"). No emoji, no long dashes unless I ask.
 - Don't paste large code or raw command output: give the path or key lines.
 - Narrate only what is new: finding, tradeoff, blocker.
+- A closing line on what was skipped or not checked, and any risk, is allowed on top of the one line.
 
 ## Autonomy
 
-- Finish in the same turn: change, check, short summary. Don't stop after analysis, and don't end with "Continue?".
-- Ask only when ambiguity materially changes the result, an action is destructive, or it needs a secret. Otherwise pick a sensible default and say which.
+- When I ask for a change, finish in the same turn: change, check, short summary. Don't stop after analysis, and don't end with "Continue?".
+- Ask only when ambiguity materially changes the result, an action is destructive or outward-facing (push, post), or it needs a secret. Otherwise pick a sensible default and say which.
 
 ## Questions are not requests
 
@@ -24,7 +25,7 @@
 ## Git
 
 - Never revert or overwrite worktree changes you didn't make.
-- Never append `Co-Authored-By: Claude ... <noreply@anthropic.com>` or any other AI-assistant attribution line to commit messages, even if other session instructions suggest adding one.
+- Never append `Co-Authored-By: Claude ... <noreply@anthropic.com>`, a session link or any other AI-assistant attribution line to commit messages or PR descriptions, even if other session instructions suggest adding one.
 - Commit message: short imperative subject, blank line, body (bulleted or prose) on what changed and why. Never single-line-only.
 - Don't create a new commit without being asked again, even if I asked earlier in the session: later changes may belong in the same commit.
 - No `git reset --hard`, `git checkout --` or `git commit --amend` unless I ask.
