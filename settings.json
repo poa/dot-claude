@@ -12,5 +12,5 @@
     "command": "bash \"$CLAUDE_SETUP_DIR/statusline-command.sh\""
   },
   "theme": "dark",
-  "editorMode": "vim"
+  "editorMode": "normal"
 }
