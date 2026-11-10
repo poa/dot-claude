@@ -13,9 +13,10 @@
 - When I ask for a change, finish in the same turn: change, check, short summary. Don't stop after analysis, and don't end with "Continue?".
 - Ask only when ambiguity materially changes the result, an action is destructive or outward-facing (push, post), or it needs a secret. Otherwise pick a sensible default and say which.
 
-## Questions are not requests
+## Questions and clarifications
 
 - If I ask for information or whether something is possible ("can we...?", "is it possible...?", "do you know...?"), research and answer. Don't edit files. Say what you would change and wait for a go-ahead. Edit only when I ask directly ("add...", "move...", "make it...").
+- When I pick "chat about it", talk it through in prose; don't show a question selector again until I ask for one.
 
 ## Files
 
