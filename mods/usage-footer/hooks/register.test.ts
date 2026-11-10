@@ -106,6 +106,27 @@ for (const surface of ['terminal', 'desktop'] as const) {
   })
 }
 
+test('shows the model of the last main-thread request, not the configured one', async ($, on) => {
+  mock.clock(on)
+  on('session.usage', () => ({ value: usage }))
+  on('session.model', () => ({ value: 'claude-sonnet-5-5' }))
+  on('ui.render', { component: 'SessionMode' }, ($, e) => {
+    const { Text } = $.ui.resolve(e)
+    return h(Text, {}, '') as RenderElement
+  })
+  on('turn.step', async function* (_, e) {
+    return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn', usage: null }
+  })
+
+  const ui = await $.ui.mount({ plugin: 'usage-footer', surface: 'terminal', component: 'SessionMode', props: { modes: [] } })
+  expect(await ui.find({ text: 'Sonnet 5.5' })).toBeDefined()
+
+  for await (const _ of $.turn.step({ turnId: 't1', index: 0, model: 'claude-opus-5-5', messageCount: 1 })) {
+    // no chunks
+  }
+  expect(await ui.find({ text: 'Opus 5.5' })).toBeDefined()
+})
+
 // At +07:00: Monday 2026-10-12 12:00 local = 05:00 UTC, 20:30 local = 13:30 UTC; Saturday 2026-10-10 12:00.
 const NOON_LOCAL = Date.UTC(2026, 9, 12, 5, 0)
 const EVENING_LOCAL = Date.UTC(2026, 9, 12, 13, 30)

@@ -7,6 +7,7 @@ declare module 'claude-code' {
     'usage-footer': {
       lastRequestAt: number | null
       effort: Effort | null
+      model: string | null
       busy: boolean
       lastHumanAt: number | null
       compactedAt: number | null

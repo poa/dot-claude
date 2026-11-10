@@ -27,6 +27,7 @@ const WEEKDAYS = [1, 2, 3, 4, 5]
 // Session state, kept across hot reloads (module variables are not).
 const lastRequestAtAtom = atom({ plugin: 'usage-footer', key: 'lastRequestAt' } as const, null)
 const effortAtom = atom({ plugin: 'usage-footer', key: 'effort' } as const, null)
+const modelAtom = atom({ plugin: 'usage-footer', key: 'model' } as const, null)
 const busyAtom = atom({ plugin: 'usage-footer', key: 'busy' } as const, false)
 const lastHumanAtAtom = atom({ plugin: 'usage-footer', key: 'lastHumanAt' } as const, null)
 const compactedAtAtom = atom({ plugin: 'usage-footer', key: 'compactedAt' } as const, null)
@@ -451,6 +452,7 @@ export const register: Register = (on, options) => {
     const startedAt = await $.clock.now()
     if (e.agentId === undefined) {
       await update($, lastRequestAtAtom, () => startedAt)
+      await update($, modelAtom, () => e.model)
       if (e.effort !== undefined) {
         const effort = String(e.effort)
         await update($, effortAtom, () => effort)
@@ -498,7 +500,8 @@ export const register: Register = (on, options) => {
     const usage = await $.session.usage()
     const segments = buildSegments(
       usage,
-      modelName(await $.session.model()),
+      // Last main-thread request's model (opusplan switches in plan mode); the configured one until the first.
+      modelName((await read($, modelAtom)) ?? (await $.session.model())),
       (await read($, effortAtom)) ?? undefined,
       (await read($, lastRequestAtAtom)) ?? undefined,
       now,
