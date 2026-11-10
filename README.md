@@ -77,6 +77,61 @@ This is what `install.sh --remote-control` leaves. Without Remote Control, `"CLA
 
 `keybindings.json` makes `Enter` and `Shift+Enter` insert a new line; `Ctrl+Enter` sends. `Ctrl+X Enter`, a Claude Code default, also sends, in any terminal. `Ctrl+K` keeps its default, deleting from the cursor to the end of the line.
 
+### Input hotkeys
+
+Defaults are from memory of Claude Code 2.1.x, not generated from the app: `/keybindings` shows the real list. `Initial` is the default action, `Changed` what `keybindings.json` makes of it, `-` if untouched.
+
+**Send and new line**
+
+| Key | Initial | Changed |
+| --- | --- | --- |
+| `Enter` | Send | New line |
+| `Shift+Enter` | New line, in terminals that report it | New line, set explicitly |
+| `Ctrl+Enter` | Unbound | Send (needs the Windows Terminal mapping below) |
+| `Ctrl+X Enter` | Send (queue) | - |
+| `Space` | Hold to talk | Plain space |
+| `Alt+V` | Unbound | Push to talk |
+| `\` then `Enter`, `Alt+Enter` | New line | - |
+
+**Move**
+
+| Key | Initial | Changed |
+| --- | --- | --- |
+| `Ctrl+A` / `Ctrl+E` | Start / end of line | - |
+| `Ctrl+B` / `Ctrl+F` | Back / forward one char | - |
+| `Alt+B` / `Alt+F` | Back / forward one word | - |
+| `Up` / `Down` | Move between lines, then history | - |
+
+**Delete**
+
+| Key | Initial | Changed |
+| --- | --- | --- |
+| `Ctrl+W` | Delete word backward | - |
+| `Alt+D` | Delete word forward | - |
+| `Ctrl+U` | Delete to start of line | - |
+| `Ctrl+K` | Delete to end of line | - |
+| `Ctrl+Y` | Paste what `Ctrl+W`, `Ctrl+U` or `Ctrl+K` deleted | - |
+| `Ctrl+H` | Backspace | - |
+| `Ctrl+D` | Delete char forward, exit on empty prompt | - |
+
+**Edit, session and mode**
+
+| Key | Initial | Changed |
+| --- | --- | --- |
+| `Ctrl+G` | Edit the prompt in `$EDITOR` | - |
+| `Ctrl+R` | Search prompt history | - |
+| `Ctrl+S` | Stash the prompt | - |
+| `Ctrl+V` | Paste an image | - |
+| `Esc Esc` | Clear the input, or rewind when empty | - |
+| `Ctrl+C` | Clear the input or cancel | - |
+| `Ctrl+L` | Redraw the screen | - |
+| `Shift+Tab` | Cycle permission mode | - |
+| `Alt+P` | Switch model | - |
+| `Alt+T` | Toggle thinking | - |
+| `Ctrl+O` | Toggle transcript view | - |
+| `Ctrl+T` | Toggle todo list | - |
+| `Ctrl+B` | Send the running command to the background | - |
+
 ### Windows Terminal: make Ctrl+Enter send
 
 Windows Terminal sends `Ctrl+Enter` as plain `Enter`, so Claude Code can't tell them apart. A `sendInput` action makes it send `ESC[13;5u` (the extended-keys code for Ctrl+Enter) instead. Tested with Claude Code 2.1.289 under WSL, 2026-10-11.
@@ -190,3 +245,37 @@ Scripts in `bin/` for the sessions in `~/.claude/projects` (`$CLAUDE_CONFIG_DIR/
 - `DRIFT` from `install.sh`: something replaced a link with a regular file. Diff the two, merge into the repo, delete the file and re-run.
 - Mod checks: `claude plugin validate mods/usage-footer` and `claude plugin test mods/usage-footer`.
 - Session script checks: `tests/sessions.sh` runs the scripts that change or delete sessions on fake ones in a scratch folder, never on `~/.claude`.
+
+## Skills usage notes
+
+Findings on which plugin skills are worth keeping enabled. Every enabled skill's name and description is sent with each request, so unused bundles cost context. The body loads only when a skill is invoked. Disable a bundle with `/plugin disable <name>@<marketplace>`, then `/reload-plugins`.
+
+### What the usage tips showed
+
+- Used: `agent-skills` (`idea-refine`), `ponytail` (`ponytail-audit`, `ponytail-review`), `supermatt` (`domain-modeling`), `plugin-authoring` (built in).
+- Unused: `superpowers` (large, and its SessionStart hook adds a skill to every session), `honey`, `42crunch-api-security-testing`, `code-review-anthropics`.
+- Plan: keep `ponytail` on. Keep `agent-skills` and `supermatt` only while their one used skill matters, or copy that skill into `~/.claude/skills/` and disable the bundle.
+
+### Code review skills compared
+
+| | ponytail-review | agent-skills `code-review-and-quality` | supermatt `code-review` |
+|---|---|---|---|
+| Size | about 860 words | about 3400 words | about 3800 words plus 3 files |
+| Input | uncommitted changes, last commit, branch, PR or files | any diff, also pasted | diff since a fixed point (branch, commit, tag) |
+| Run | inline, one pass | inline, one pass | 3 subagents (Standards, Spec, Adversarial), validators, optional external model CLI |
+| Focus | bugs, security, load, tests, speed, code to cut | correctness, readability, architecture, security, performance | repo standards, match to spec, failure in production |
+| Verifies by | a concrete failing case per finding, grep of callers | caller and guard checks, mutation test | quoted `file:line`, triggers run in a scratch copy, validator pass |
+| Output | numbered Must / Should / Nice, plain English, ship or fix N first | Critical / Required / Nit / FYI, checklist | P0 to P3 per axis, then Ready / Ready with fixes / Not ready |
+| Cost | low | medium | high |
+| Best for | everyday review of a small change | design review before a merge | a feature branch against an issue or spec |
+
+Also present:
+- Built-in `/code-review`: effort levels low to max, `--fix` applies findings, `--comment` posts them on a PR. Overlaps most with ponytail-review.
+- `code-review-anthropics`: GitHub PRs only (through `gh`, 5 Sonnet agents, posts a PR comment). Overhead without PRs.
+
+Use:
+- Daily: ponytail-review or built-in `/code-review`.
+- Occasional deep review of a branch: supermatt. Run `/supermatt:setup-supermatt-skills` first, or it asks for an issue tracker.
+- Disable `code-review-anthropics`. `agent-skills` review adds little beyond the two above.
+
+Based on reading the skill texts, not on runs against a real diff.
