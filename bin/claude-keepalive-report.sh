@@ -26,7 +26,8 @@ option on: one line per request, ping and compaction, with the 5-hour and
 Prints one "name<TAB>value" row per figure; costs are in % of a meter (_5h,
 _7d), or in thousands of input-token equivalents at API prices (_keq) while
 the log has no meter readings. The main ones:
-  write_read_ratio    a written token's cost in read tokens (API prices: 20)
+  write_read_ratio    a written token's cost in read tokens (API prices: 20); "-"
+                      when the fit can't tell the read price from zero
   rebuilds_avoided    returns to a warm cache after the cache lifetime
   ping_net_5h         those rebuilds minus all pings: above 0, pings pay off
 
@@ -155,7 +156,8 @@ log_rows() {
 
 # The meter fit, one row: kind (weights, api-ratios or none), windows for 5h and 7d, the weights
 # wr wn wo of a read, newly cached (written or uncached) and output token per million, the
-# meters' scales s5 s7 (% per weighted million tokens) and the main model's price.
+# meters' scales s5 s7 (% per weighted million tokens), the main model's price and whether the
+# read weight is clearly above zero (1/0).
 #
 # Hourly windows over all sessions, inside one meter window (same reset at both ends): the
 # meter's rise across each against the tokens in it. "weights": least squares on the 5-hour
@@ -208,9 +210,15 @@ fit() {
         if (wr > 0 && wn > 0 && wo > 0) kind = "weights"
       }
       if (kind != "weights") { wr = 0.1; wn = 2; wo = 5 }
+      # the read weight must beat twice its standard error, else written / read is noise
+      sure = 1
+      if (kind == "weights") {
+        for (k = 1; k <= NW[5]; k++) { e = WD[5, k] - wr * WR[5, k] - wn * WN[5, k] - wo * WO[5, k]; rss += e * e }
+        sure = wr > 2 * sqrt(rss / (NW[5] - 3) * (a22 * a33 - a23 * a23) / dt)
+      }
       s5 = scale(5); s7 = scale(7)
       if (s5 == 0) { kind = "none"; s5 = 1000; s7 = 0 }
-      printf "%s\t%d\t%d\t%.6g\t%.6g\t%.6g\t%.6g\t%.6g\t%s\n", kind, NW[5], NW[7], wr, wn, wo, s5, s7, base + 0
+      printf "%s\t%d\t%d\t%.6g\t%.6g\t%.6g\t%.6g\t%.6g\t%s\t%d\n", kind, NW[5], NW[7], wr, wn, wo, s5, s7, base + 0, sure
     }'
 }
 
@@ -220,7 +228,7 @@ fit() {
 # the pings wasted. A keep-alive compaction is weighed against R alone: rebuilding P's history
 # against what R cost; the smaller history of later requests isn't counted.
 ledger() {
-  awk -F'\t' -v kind="$1" -v nw5="$2" -v nw7="$3" -v wr="$4" -v wn="$5" -v wo="$6" -v s5="$7" -v s7="$8" -v base="$9" \
+  awk -F'\t' -v kind="$1" -v nw5="$2" -v nw7="$3" -v wr="$4" -v wn="$5" -v wo="$6" -v s5="$7" -v s7="$8" -v base="$9" -v sure="${10}" \
     -v ttl_ms=$((ttl * 60000)) "$PRICE"'
     {
       ses = $3; f = fac($5); rr = $6 * f; nn = ($7 + $8) * f; oo = $9 * f
@@ -266,7 +274,7 @@ ledger() {
       for (ses in kc) if (kc[ses]) { compactions++; comp5 += c5[ses]; comp7 += c7[ses] }
       row("fit", kind); row("fit_windows_5h", nw5); row("fit_windows_7d", nw7)
       money("read_per_M", s5 * wr, s7 * wr); money("written_per_M", s5 * wn, s7 * wn); money("output_per_M", s5 * wo, s7 * wo)
-      row("write_read_ratio", sprintf("%.1f", wn / wr))
+      row("write_read_ratio", sure ? sprintf("%.1f", wn / wr) : "-")
       row("requests", requests + 0); row("agent_requests", agent_requests + 0)
       row("pings", pings + 0); row("pings_failed", failed + 0)
       row("rebuilds_avoided", avoided + 0); row("chains_wasted", wasted + 0)
@@ -330,7 +338,12 @@ whatif_rows() {
     END { for (k = 0; k <= 6; k++) printf "%d\t%d\t%d\t%d\t%.2f\n", k, gaps[k], pings[k], avoided[k], net[k] }'
 }
 
-IFS=$'\t' read -r kind nw5 nw7 wr wn wo s5 s7 price < <(log_rows | fit)
+IFS=$'\t' read -r kind nw5 nw7 wr wn wo s5 s7 price sure < <(log_rows | fit)
+
+# On a terminal, line the columns up; piped output stays tab-separated
+tty=0
+[ -t 1 ] && tty=1
+tidy() { if [ $tty -eq 1 ] && command -v column >/dev/null; then column -t -s$'\t'; else cat; fi; }
 
 if [ $whatif -eq 1 ]; then
   [ -d "$base" ] || fail "directory not found: $base"
@@ -339,9 +352,12 @@ if [ $whatif -eq 1 ]; then
     api-ratios) echo "net in % of the 5-hour meter, API price ratios scaled on $nw5 hourly windows of the usage log" >&2 ;;
     *)          echo "net in thousands of input-token equivalents at API price ratios (no meter readings in $logs)" >&2 ;;
   esac
-  transcript_rows | whatif_rows "$wr" "$wn" "$wo" "$s5" "$price"
+  {
+    [ $tty -eq 1 ] && printf 'limit\tgaps pinged\tpings\trebuilds avoided\tnet\n'
+    transcript_rows | whatif_rows "$wr" "$wn" "$wo" "$s5" "$price"
+  } | tidy
   exit 0
 fi
 
 [ -n "$(log_rows | head -1)" ] || fail "no usage log in $logs${since:+ since $since}; turn on logUsage in /config (usage-footer)"
-log_rows | ledger "$kind" "$nw5" "$nw7" "$wr" "$wn" "$wo" "$s5" "$s7" "$price"
+log_rows | ledger "$kind" "$nw5" "$nw7" "$wr" "$wn" "$wo" "$s5" "$s7" "$price" "$sure" | tidy

@@ -181,6 +181,50 @@ Comparing a week with keep-alive against a week without wouldn't show it. Keep-a
 
 `fit` says `weights` once the log has 10 hourly windows with meter readings, else `api-ratios` (API price ratios scaled to the meter). Other use of the same account (claude.ai, another computer) moves the meters too and blurs the fit, and Claude Code's own background requests aren't logged. Switch `logUsage` off when you're done; the log takes about 300 bytes per request.
 
+### Reading the report
+
+On a terminal the columns are aligned; piped, they are tab-separated. Money rows end in `_5h` and `_7d`: percent of that meter. While the log has no meter readings they end in `_keq` instead: thousands of input tokens at API prices, for comparing rows with each other only. Every row ending in `_7d` is missing when the log has no 7-day readings.
+
+Without `-w` (the ledger of what really happened, from the usage log):
+
+| Row | Meaning | How to read it |
+|---|---|---|
+| `fit` | `weights`: the meter's price per token was fitted on your data. `api-ratios`: too little data, API price ratios were scaled to the meter. `none`: no meter readings at all | Trust the money rows most under `weights`. Under `api-ratios` they are estimates |
+| `fit_windows_5h`, `fit_windows_7d` | Hourly windows the fit used | The weights need at least 10 windows. More is better |
+| `read_per_M_*`, `written_per_M_*`, `output_per_M_*` | What a million read, newly cached and output tokens move the meter | The three prices the rest is computed from |
+| `write_read_ratio` | `written_per_M` divided by `read_per_M` | API price says 20. `-` means the fit can't tell the read price from zero (it is not above twice its standard error), so the ratio would be noise; reads then cost very little, and the pings look nearly free. Read it together with `fit`: under `api-ratios` it is the assumed 20 |
+| `requests`, `agent_requests` | Main-conversation and subagent requests in the log | Only the main ones are weighed |
+| `pings`, `pings_failed` | Keep-alive pings sent, and those that billed nothing | Failed pings cost nothing and are not counted in `pings` |
+| `rebuilds_avoided` | Pinged gaps where you came back to a warm cache after the cache lifetime | These are the wins: each one paid a read instead of a rebuild |
+| `chains_wasted` | Pinged gaps that ended with a cold cache anyway, or a compaction in between | Pings that bought nothing |
+| `pings_unneeded` | Pinged gaps shorter than the cache lifetime | Pings you didn't need |
+| `chains_open` | Pings sent for a session that hasn't had a message since | Not yet a win or a loss |
+| `cold_starts` | Returns after a long gap, to a cold cache, with no pings | What keep-alive was off for or didn't cover |
+| `keepalive_compactions` | Evening compactions the mod ran | See the two compaction rows below |
+| `used_*` | All usage in the log, in the unit of the fit | The base for `ping_net_share` |
+| `ping_cost_*`, `rebuild_saving_*` | What the pings cost, and what the avoided rebuilds would have cost | `ping_net` is their difference |
+| `ping_net_*` | `rebuild_saving` minus `ping_cost` | Above 0: keep-alive saved usage. Below 0: it cost more than it saved |
+| `ping_net_share` | `ping_net_5h` as a share of `used_5h` | The saving as a share of the period's use. A few percent is normal |
+| `compaction_cost_*`, `compaction_saving_*` | The evening compactions, against rebuilding the whole history at your next request | Saving above cost: compaction paid off. It ignores the smaller history of later requests |
+
+A sample: `rebuilds_avoided 13`, `ping_cost_5h 4.46`, `rebuild_saving_5h 38.62`, `ping_net_5h 34.16`, `ping_net_share 5.2%`. The 37 pings cost 4.5% of the 5-hour meter, the 13 avoided rebuilds would have cost 38.6%, so keep-alive saved 34.2%, which is 5.2% of everything used. If `write_read_ratio` is `-`, take the size of the saving as an upper bound: with API-like prices it can be several times smaller, but the sign and the best `maxIdlePings` don't change.
+
+With `-w` (a what-if replay, not what happened):
+
+- It replays the gaps between requests in `~/.claude/projects` transcripts, for the work hours and days you set (`--from`, `--until`, `--days`, `--utc-offset`; defaults 07:00-20:00, Mon-Fri), and the cache lifetime and lead (`--ttl`, `--lead`). It doesn't need the usage log. Without one it uses API prices.
+- Stderr says the unit of `net` and what the weights came from. On a terminal there is a header row; piped there isn't.
+- One row per `maxIdlePings` limit, 0 to 6. Limit 0 is keep-alive off, all zeros: the baseline.
+
+| Column | Meaning |
+|---|---|
+| `limit` | The `maxIdlePings` value replayed |
+| `gaps pinged` | Gaps between two requests of a session in which at least one ping would go out (inside work hours, before the next request) |
+| `pings` | Pings sent in all those gaps |
+| `rebuilds avoided` | Gaps where the pings kept the cache alive until your next request, so that request found it warm |
+| `net` | Rebuilds avoided minus pings, in % of the 5-hour meter |
+
+Pick the limit where `net` stops rising. In this sample the net is 57.54, 68.09, 74.24, 77.85, 79.08, 79.08 for limits 1 to 6: it flattens at 5, and 6 sends one ping more for nothing, so set `maxIdlePings` to 5. If every `net` is below 0, switch keep-alive off. It ignores compactions and the meter's other users, so treat small differences between neighbouring limits as noise.
+
 ---
 
 ## Options
