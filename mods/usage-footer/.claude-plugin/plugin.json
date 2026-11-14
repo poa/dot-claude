@@ -1,7 +1,7 @@
 {
   "name": "usage-footer",
   "version": "0.4.0",
-  "description": "Prompt footer with model, effort, context bar, 5h limit and cache countdown; keeps the prompt cache warm during work hours and compacts when idle after them",
+  "description": "Prompt footer with model, effort, context bar, 5h and 7-day limits and cache countdown; keeps the prompt cache warm during work hours and compacts when idle after them",
   "types": "./types/index.d.ts",
   "userConfig": {
     "keepAlive": {
@@ -57,6 +57,18 @@
       "default": 60,
       "min": 2,
       "max": 60
+    },
+    "showFiveHour": {
+      "type": "boolean",
+      "title": "Show the 5-hour limit",
+      "description": "Footer segment with the share of the 5-hour plan limit used. Only on a subscription plan.",
+      "default": true
+    },
+    "showWeek": {
+      "type": "boolean",
+      "title": "Show the weekly limit",
+      "description": "Footer segment with the share of the 7-day plan limit used. Only on a subscription plan.",
+      "default": true
     },
     "logUsage": {
       "type": "boolean",

@@ -43,6 +43,8 @@ export type Settings = WorkTime & {
   maxIdlePings: number
   minCompactTokens: number
   logUsage: boolean
+  showFiveHour: boolean
+  showWeek: boolean
 }
 
 // A number option clamped to [min, max]; the default when unset.
@@ -63,6 +65,8 @@ export function readSettings(options: PluginOptions): Settings {
     maxIdlePings: Math.round(numberOption(options.maxIdlePings, 3, 0, 24)),
     minCompactTokens: numberOption(options.minCompactTokens, 50_000, 0, 10_000_000),
     logUsage: options.logUsage === true,
+    showFiveHour: options.showFiveHour !== false,
+    showWeek: options.showWeek !== false,
   }
 }
 
@@ -177,6 +181,7 @@ export function buildSegments(
   lastRequestAt: number | undefined,
   now: number,
   ttlMs = 60 * MINUTE_MS,
+  show = { fiveHour: true, week: true },
 ): Segment[] {
   const segments: Segment[] = []
 
@@ -192,8 +197,12 @@ export function buildSegments(
   }
 
   const fiveHour = fiveHourUsed(usage)
-  if (fiveHour !== undefined) {
+  if (show.fiveHour && fiveHour !== undefined) {
     segments.push([{ text: `5h ${Math.round(fiveHour)}%`, color: byPercent(fiveHour) }])
+  }
+  const week = meter(usage, 'seven_day').used
+  if (show.week && week !== undefined) {
+    segments.push([{ text: `7d ${Math.round(week)}%`, color: byPercent(week) }])
   }
 
   if (lastRequestAt !== undefined) {
@@ -506,6 +515,7 @@ export const register: Register = (on, options) => {
       (await read($, lastRequestAtAtom)) ?? undefined,
       now,
       settings.ttlMs,
+      { fiveHour: settings.showFiveHour, week: settings.showWeek },
     )
     const keepAlive = keepAliveSegment(settings, await planInput($, settings, now, usage), await read($, pausedByAtom))
     if (keepAlive) {

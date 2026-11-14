@@ -2,7 +2,7 @@
 
 A Claude Code mod (plugin function hooks) that:
 
-1. Draws a colored usage footer under the prompt box: model, effort, context bar, 5-hour limit, and a prompt-cache countdown.
+1. Draws a colored usage footer under the prompt box: model, effort, context bar, 5-hour and 7-day limits, and a prompt-cache countdown.
 2. Keeps the prompt cache warm while you are idle during work hours, so the next message doesn't have to process the whole conversation again.
 3. Compacts an idle session after work hours (or after a few idle pings), just before the cache would expire, so a session left open overnight stays cheap to resume.
 
@@ -18,7 +18,7 @@ It comes with a status line script (`statusline-command.sh` in this repo) that s
 ### Footer (under the prompt box, next to the mode indicator)
 
 ```
-Opus 5.5 · xhigh · ▰▰▰▱▱▱▱▱▱▱ · 5h 30% · cache 42m · keep-alive ×2/3 →20:00
+Opus 5.5 · xhigh · ▰▰▰▱▱▱▱▱▱▱ · 5h 30% · 7d 12% · cache 42m · keep-alive ×2/3 →20:00
 ```
 
 | Segment | Meaning | Colors |
@@ -26,7 +26,8 @@ Opus 5.5 · xhigh · ▰▰▰▱▱▱▱▱▱▱ · 5h 30% · cache 42m · ke
 | `Opus 5.5` | Current model | magenta, bold |
 | `xhigh` | Effort of the last main-thread request. Before the first one, the configured level: `modelSettings.<model>.effortLevel`, else `effortLevel` | cyan |
 | `▰▰▰▱▱▱▱▱▱▱` | Context window used, 10 cells | green < 50 %, yellow 50–79 %, red ≥ 80 % |
-| `5h 30%` | 5-hour rate limit used | same thresholds |
+| `5h 30%` | 5-hour rate limit used (`showFiveHour`) | same thresholds |
+| `7d 12%` | 7-day rate limit used (`showWeek`) | same thresholds |
 | `cache 42m` | Minutes left on the prompt cache, counted from the **start** of the last request (that's how the API counts it) | green > 15 m, yellow ≤ 15 m, red `cache cold` |
 | keep-alive note | What the keep-alive will do next (see below) | dim, or yellow when paused |
 
@@ -241,6 +242,8 @@ Change them in `/config` (the usage-footer rows). They're stored in `~/.claude/s
 | `minCompactTokens` | `50000` | Smaller contexts aren't compacted; they're left to expire. |
 | `utcOffset` | empty | Empty means the system timezone. Set it (e.g. `+07:00`, from `-12:00` to `+14:00`) if work hours look shifted. |
 | `cacheTtlMinutes` | `60` | Assumed cache lifetime, 2–60. Keep 60; lower it only for a quick test. |
+| `showFiveHour` | `true` | Show the `5h` segment. |
+| `showWeek` | `true` | Show the `7d` segment. |
 | `logUsage` | `false` | Writes each request, ping and compaction with its tokens and both meters to `~/.claude/logs/usage/`, for `claude-keepalive-report.sh` (see "Usage log"). |
 
 ### Quick live test

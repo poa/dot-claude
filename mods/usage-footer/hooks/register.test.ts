@@ -54,8 +54,15 @@ describe('bar', () => {
 describe('buildSegments', () => {
   test('model, effort, context bar and 5h limit; no cache before the first request', async () => {
     const s = buildSegments(usage, 'Opus 5.5', 'medium', undefined, 0)
-    expect(s.map(text)).toEqual(['Opus 5.5', 'medium', '▰▰▰▱▱▱▱▱▱▱', '5h 85%'])
+    expect(s.map(text)).toEqual(['Opus 5.5', 'medium', '▰▰▰▱▱▱▱▱▱▱', '5h 85%', '7d 6%'])
     expect(s[3]?.[0]?.color).toBe('red')
+  })
+
+  test('7d limit follows 5h; each can be switched off', async () => {
+    const u = usage
+    expect(buildSegments(u, undefined, undefined, undefined, 0).map(text)).toEqual(['▰▰▰▱▱▱▱▱▱▱', '5h 85%', '7d 6%'])
+    expect(buildSegments(u, undefined, undefined, undefined, 0, undefined, { fiveHour: false, week: true }).map(text)).toEqual(['▰▰▰▱▱▱▱▱▱▱', '7d 6%'])
+    expect(buildSegments(u, undefined, undefined, undefined, 0, undefined, { fiveHour: true, week: false }).map(text)).toEqual(['▰▰▰▱▱▱▱▱▱▱', '5h 85%'])
   })
 
   test('cache countdown: green above 15m, yellow at 15m or less, red when cold', async () => {
