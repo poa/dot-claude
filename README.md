@@ -225,7 +225,7 @@ Scripts in `bin/` for the sessions in `~/.claude/projects` (`$CLAUDE_CONFIG_DIR/
 | Script | What it does |
 |---|---|
 | `claude-projects.sh` | One line per project folder: sessions, size, memory files, last activity, status and real path. Read-only. |
-| `claude-sessions.sh` | One line per session: ID, last change, size, prompts, replies, project, git branch and name; sorted by project, then time. Read-only. |
+| `claude-sessions.sh` | One line per session: ID, `ORPH` (`yes` for a `.orphaned-...` stub Claude Code set aside, which repeats the ID of the real session), last change, size, prompts, replies, project, git branch and name; sorted by project, then time. Read-only. |
 | `claude-short-sessions.sh` | IDs of sessions with at most 3 replies (`-n` to change); `-v` prints them in the `claude-sessions.sh` table. Read-only; its output is meant for `claude-prune.sh`. |
 | `claude-prune.sh` | Deletes sessions by ID or by its first 8 or more characters; refuses a prefix that matches several. Dry run unless the first argument is `--go`. |
 | `claude-check-cwd.sh` | Finds sessions whose recorded working folder doesn't match their project folder (`MISMATCH`) or no longer exists after a rename that keeps the folder name (`GONE`, `my_repo` to `my-repo`), sessions whose project's path is gone too (`LOST`: renamed to another name, moved or deleted), and misnamed project folders. `-m rewrite` changes the recorded path; with `--to <new path>` and a `-p` matching one folder, it also moves a renamed project's sessions and `memory/` to the new path's folder. `-m move` moves the session to the folder of its path. Dry run unless `--go`; changed files are backed up to `~/claude-cwd-backup`. |
@@ -237,6 +237,18 @@ Scripts in `bin/` for the sessions in `~/.claude/projects` (`$CLAUDE_CONFIG_DIR/
 - Prompts are the messages you typed; commands, tool results and summaries don't count. Replies are model responses: one prompt gets several while Claude works.
 - The scripts never change or delete a session whose Claude Code process is running (they check `~/.claude/sessions`). Close other sessions before `claude-check-cwd.sh --go` anyway.
 - The output is a plain table, one row per session or folder, for `cut`, `awk` and `sort`. On a terminal narrower than the table, lines are cut at its width instead of wrapping; piped output is never cut. Pipe to `less -S` to scroll sideways.
+
+### Cleaning up sessions
+
+Deleting is permanent: `claude-prune.sh` removes the session's `.jsonl` file and its same-named folder (tool results) with `rm`, no backup. It leaves the project's `memory/` alone. Go in this order:
+
+1. Find candidates: `claude-short-sessions.sh -n 3 -v` for accidental starts and quick tests (`-n 0` for sessions with no reply, `-p STR` for one project), or `claude-sessions.sh` for everything, sorted with `sort` or `awk`. `claude-projects.sh` shows size and last activity per project folder, to spot stale projects.
+2. Read the `-v` table before deleting: sessions you named with `/rename` are listed too if they are short.
+3. Dry run: `claude-short-sessions.sh -n 3 | xargs -r claude-prune.sh` only prints `DELETE` lines.
+4. Delete: the same line with `--go` after `claude-prune.sh`. Running sessions are skipped (`SKIP (running)`), and a prefix that matches several sessions is refused (`AMBIGUOUS`): give more characters.
+5. Sessions whose folder was renamed or removed show up in `claude-check-cwd.sh` as `MISMATCH` or `GONE`: fix them with `-m rewrite --go` or prune them.
+
+For a long session you want to keep, don't prune it: resume it and run `/compact`, or start a new one. Nothing compacts a session while it sits idle, and every resumed message re-sends the whole context. See "What the usage tips showed" below.
 
 ## Day to day
 

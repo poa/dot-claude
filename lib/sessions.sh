@@ -141,17 +141,18 @@ session_stats() {
 
 # session_row <session file>: one tab-separated row for session_table; call session_stats on the file first
 session_row() {
-  local id name
+  local id name orph=-
   id=$(basename "$1" .jsonl)
+  [[ $id == *.orphaned-* ]] && orph=yes
   name=$title; [ -n "$name" ] || name="(prompt) $first"
-  printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" "${id:0:8}" "$(stat -c '%y' "$1" | cut -c1-16)" \
+  printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" "${id:0:8}" "$orph" "$(stat -c '%y' "$1" | cut -c1-16)" \
     "$(( $(stat -c %s "$1") / 1024 ))KB" "$prompts" "$replies" "$(short "$(basename "$(dirname "$1")")")" \
     "$branch" "${name:0:60}"
 }
 
 # session_table: session_row lines from stdin as a table with a header, sorted by project, then time
 session_table() {
-  { printf "ID\tLAST MODIFIED\tSIZE\tPROMPTS\tREPLIES\tPROJECT\tBRANCH\tNAME\n"; sort -t$'\t' -k6,6 -k2,2; } | table 3 4 5
+  { printf "ID\tORPH\tLAST MODIFIED\tSIZE\tPROMPTS\tREPLIES\tPROJECT\tBRANCH\tNAME\n"; sort -t$'\t' -k7,7 -k3,3; } | table 4 5 6
 }
 
 # table [N...]: align tab-separated lines into columns, right-aligning columns N...; the last column isn't padded
