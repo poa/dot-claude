@@ -36,6 +36,8 @@ const pausedByAtom = atom({ plugin: 'usage-footer', key: 'pausedBy' } as const, 
 const failuresAtom = atom({ plugin: 'usage-footer', key: 'failures' } as const, 0)
 const compactColdAtom = atom({ plugin: 'usage-footer', key: 'compactCold' } as const, false)
 
+export type ContextDisplay = 'bar' | 'numbers' | 'off'
+
 export type Settings = WorkTime & {
   keepAlive: boolean
   untilText: string
@@ -43,6 +45,7 @@ export type Settings = WorkTime & {
   maxIdlePings: number
   minCompactTokens: number
   logUsage: boolean
+  contextDisplay: ContextDisplay
   showFiveHour: boolean
   showWeek: boolean
 }
@@ -65,6 +68,7 @@ export function readSettings(options: PluginOptions): Settings {
     maxIdlePings: Math.round(numberOption(options.maxIdlePings, 3, 0, 24)),
     minCompactTokens: numberOption(options.minCompactTokens, 50_000, 0, 10_000_000),
     logUsage: options.logUsage === true,
+    contextDisplay: options.contextDisplay === 'numbers' || options.contextDisplay === 'off' ? options.contextDisplay : 'bar',
     showFiveHour: options.showFiveHour !== false,
     showWeek: options.showWeek !== false,
   }
@@ -113,6 +117,9 @@ export function tokens(n: number): string {
   }
   return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n)
 }
+
+// A context window size: 1_000_000 -> 1M, 262_144 -> 262k
+export const windowSize = (n: number) => (n >= 1_000_000 ? `${Number((n / 1_000_000).toFixed(1))}M` : tokens(n))
 
 // What a request cost, for the log lines: its tokens and the 5-hour meter before and after.
 export function costNote(u: Usage | undefined, before: number | undefined, after: number | undefined): string {
@@ -181,7 +188,7 @@ export function buildSegments(
   lastRequestAt: number | undefined,
   now: number,
   ttlMs = 60 * MINUTE_MS,
-  show = { fiveHour: true, week: true },
+  show: { context?: ContextDisplay; fiveHour: boolean; week: boolean } = { fiveHour: true, week: true },
 ): Segment[] {
   const segments: Segment[] = []
 
@@ -192,8 +199,13 @@ export function buildSegments(
     segments.push([{ text: effort, color: 'cyan' }])
   }
 
-  if (usage.context.percent !== undefined) {
-    segments.push(bar(usage.context.percent))
+  const { tokens: used, window, percent } = usage.context
+  if (show.context === 'numbers') {
+    if (used !== undefined && percent !== undefined) {
+      segments.push([{ text: `${tokens(used)}/${windowSize(window)}`, color: byPercent(percent) }])
+    }
+  } else if (show.context !== 'off' && percent !== undefined) {
+    segments.push(bar(percent))
   }
 
   const fiveHour = fiveHourUsed(usage)
@@ -515,7 +527,7 @@ export const register: Register = (on, options) => {
       (await read($, lastRequestAtAtom)) ?? undefined,
       now,
       settings.ttlMs,
-      { fiveHour: settings.showFiveHour, week: settings.showWeek },
+      { context: settings.contextDisplay, fiveHour: settings.showFiveHour, week: settings.showWeek },
     )
     const keepAlive = keepAliveSegment(settings, await planInput($, settings, now, usage), await read($, pausedByAtom))
     if (keepAlive) {

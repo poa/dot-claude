@@ -2,7 +2,7 @@ import { describe, expect, mock, test } from 'claude-code/testing'
 import type { Engine, MockClock } from 'claude-code/testing'
 import type { On, RenderElement, SessionUsage } from 'claude-code'
 
-import { bar, buildSegments, configuredEffort, costNote, modelName, tokens } from './register'
+import { bar, buildSegments, configuredEffort, costNote, modelName, tokens, windowSize } from './register'
 import type { Segment } from './register'
 
 const usage: SessionUsage = {
@@ -63,6 +63,16 @@ describe('buildSegments', () => {
     expect(buildSegments(u, undefined, undefined, undefined, 0).map(text)).toEqual(['▰▰▰▱▱▱▱▱▱▱', '5h 85%', '7d 6%'])
     expect(buildSegments(u, undefined, undefined, undefined, 0, undefined, { fiveHour: false, week: true }).map(text)).toEqual(['▰▰▰▱▱▱▱▱▱▱', '7d 6%'])
     expect(buildSegments(u, undefined, undefined, undefined, 0, undefined, { fiveHour: true, week: false }).map(text)).toEqual(['▰▰▰▱▱▱▱▱▱▱', '5h 85%'])
+  })
+
+  test('context as numbers or off', async () => {
+    const at = (context: 'bar' | 'numbers' | 'off') => buildSegments(usage, undefined, undefined, undefined, 0, undefined, { context, fiveHour: false, week: false })
+    expect(at('numbers').map(text)).toEqual(['250k/1M'])
+    expect(at('numbers')[0]?.[0]?.color).toBe('green')
+    expect(at('off')).toEqual([])
+    expect(at('bar').map(text)).toEqual(['▰▰▰▱▱▱▱▱▱▱'])
+    expect(windowSize(200_000)).toBe('200k')
+    expect(windowSize(1_500_000)).toBe('1.5M')
   })
 
   test('cache countdown: green above 15m, yellow at 15m or less, red when cold', async () => {

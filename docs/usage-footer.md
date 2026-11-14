@@ -25,7 +25,7 @@ Opus 5.5 · xhigh · ▰▰▰▱▱▱▱▱▱▱ · 5h 30% · 7d 12% · cache
 |---|---|---|
 | `Opus 5.5` | Current model | magenta, bold |
 | `xhigh` | Effort of the last main-thread request. Before the first one, the configured level: `modelSettings.<model>.effortLevel`, else `effortLevel` | cyan |
-| `▰▰▰▱▱▱▱▱▱▱` | Context window used, 10 cells | green < 50 %, yellow 50–79 %, red ≥ 80 % |
+| `▰▰▰▱▱▱▱▱▱▱` | Context window used, 10 cells. With `contextDisplay` `numbers` it is the tokens and the window instead, like `250k/1M` | green < 50 %, yellow 50–79 %, red ≥ 80 % |
 | `5h 30%` | 5-hour rate limit used (`showFiveHour`) | same thresholds |
 | `7d 12%` | 7-day rate limit used (`showWeek`) | same thresholds |
 | `cache 42m` | Minutes left on the prompt cache, counted from the **start** of the last request (that's how the API counts it) | green > 15 m, yellow ≤ 15 m, red `cache cold` |
@@ -242,6 +242,7 @@ Change them in `/config` (the usage-footer rows). They're stored in `~/.claude/s
 | `minCompactTokens` | `50000` | Smaller contexts aren't compacted; they're left to expire. |
 | `utcOffset` | empty | Empty means the system timezone. Set it (e.g. `+07:00`, from `-12:00` to `+14:00`) if work hours look shifted. |
 | `cacheTtlMinutes` | `60` | Assumed cache lifetime, 2–60. Keep 60; lower it only for a quick test. |
+| `contextDisplay` | `bar` | Context size: `bar` (10-cell progress bar), `numbers` (`250k/1M`, no percent) or `off`. Any other value counts as `bar`. |
 | `showFiveHour` | `true` | Show the `5h` segment. |
 | `showWeek` | `true` | Show the `7d` segment. |
 | `logUsage` | `false` | Writes each request, ping and compaction with its tokens and both meters to `~/.claude/logs/usage/`, for `claude-keepalive-report.sh` (see "Usage log"). |

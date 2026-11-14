@@ -58,6 +58,12 @@
       "min": 2,
       "max": 60
     },
+    "contextDisplay": {
+      "type": "string",
+      "title": "Context size: bar, numbers or off",
+      "description": "bar: 10-cell progress bar. numbers: tokens used and window, like 250k/1M. off: hide it. Anything else counts as bar.",
+      "default": "bar"
+    },
     "showFiveHour": {
       "type": "boolean",
       "title": "Show the 5-hour limit",
